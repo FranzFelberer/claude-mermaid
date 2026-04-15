@@ -99,12 +99,13 @@ describe("MCP server tool definitions", () => {
       expect(indexSource).toContain('name: "claude-mermaid"');
     });
 
-    it("should define exactly five tools", () => {
+    it("should define exactly six tools", () => {
       expect(indexSource).toContain('name: "mermaid_preview"');
       expect(indexSource).toContain('name: "mermaid_save"');
       expect(indexSource).toContain('name: "list_mermaid_charts"');
       expect(indexSource).toContain('name: "get_mermaid_chart"');
       expect(indexSource).toContain('name: "update_mermaid_chart"');
+      expect(indexSource).toContain('name: "delete_mermaid_chart"');
     });
   });
 });

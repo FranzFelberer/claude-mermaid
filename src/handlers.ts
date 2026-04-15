@@ -14,7 +14,7 @@ import {
   validateSavePath,
   getOpenCommand,
 } from "./file-utils.js";
-import { listDiagrams, getDiagramInfo, diagramExists } from "./diagram-service.js";
+import { listDiagrams, getDiagramInfo, diagramExists, deleteDiagram } from "./diagram-service.js";
 import { mcpLogger } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -489,6 +489,37 @@ export async function handleUpdateMermaidChart(args: any) {
         {
           type: "text",
           text: `Error updating diagram: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+export async function handleDeleteMermaidChart(args: any) {
+  const previewId = args.preview_id as string;
+
+  if (!previewId) {
+    throw new Error("preview_id parameter is required");
+  }
+
+  try {
+    await deleteDiagram(previewId);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Diagram "${previewId}" deleted successfully.`,
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Error deleting diagram: ${error instanceof Error ? error.message : String(error)}`,
         },
       ],
       isError: true,

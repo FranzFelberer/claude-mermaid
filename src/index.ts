@@ -16,6 +16,7 @@ import {
   handleListMermaidCharts,
   handleGetMermaidChart,
   handleUpdateMermaidChart,
+  handleDeleteMermaidChart,
 } from "./handlers.js";
 import { mcpLogger } from "./logger.js";
 
@@ -202,6 +203,23 @@ const TOOL_DEFINITIONS: Tool[] = [
       required: ["preview_id"],
     },
   },
+  {
+    name: "delete_mermaid_chart",
+    description:
+      "Delete a saved Mermaid diagram and all its associated files. " +
+      "This action is permanent and cannot be undone.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        preview_id: {
+          type: "string",
+          description:
+            "ID of the diagram to delete. Use list_mermaid_charts to find available IDs.",
+        },
+      },
+      required: ["preview_id"],
+    },
+  },
 ];
 
 const server = new Server(
@@ -248,6 +266,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return result;
       case "update_mermaid_chart":
         result = await handleUpdateMermaidChart(args);
+        mcpLogger.info(`CallTool completed: ${toolName}`);
+        return result;
+      case "delete_mermaid_chart":
+        result = await handleDeleteMermaidChart(args);
         mcpLogger.info(`CallTool completed: ${toolName}`);
         return result;
       default:

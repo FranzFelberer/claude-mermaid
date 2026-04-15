@@ -5,6 +5,7 @@ import {
   handleListMermaidCharts,
   handleGetMermaidChart,
   handleUpdateMermaidChart,
+  handleDeleteMermaidChart,
 } from "../src/handlers.js";
 import {
   getPreviewDir,
@@ -530,5 +531,44 @@ describe("handleUpdateMermaidChart", () => {
     expect(options.width).toBe(800);
     expect(options.height).toBe(600);
     expect(options.scale).toBe(2);
+  });
+});
+
+describe("handleDeleteMermaidChart", () => {
+  const testPreviewId = "delete-test";
+
+  beforeEach(async () => {
+    await setupTestEnvWithPreview(testPreviewId);
+    await handleMermaidPreview({
+      diagram: "graph TD; A-->B",
+      preview_id: testPreviewId,
+    });
+  });
+
+  afterEach(async () => {
+    await restoreTestEnv();
+  });
+
+  it("should throw error when preview_id is missing", async () => {
+    await expect(handleDeleteMermaidChart({ preview_id: undefined })).rejects.toThrow(
+      "preview_id parameter is required"
+    );
+  });
+
+  it("should return error for non-existent diagram", async () => {
+    const result = await handleDeleteMermaidChart({ preview_id: "nonexistent" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Error deleting diagram");
+  });
+
+  it("should delete an existing diagram", async () => {
+    const result = await handleDeleteMermaidChart({ preview_id: testPreviewId });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("deleted successfully");
+
+    // Verify it's gone
+    const getResult = await handleGetMermaidChart({ preview_id: testPreviewId });
+    expect(getResult.isError).toBe(true);
+    expect(getResult.content[0].text).toContain("Diagram not found");
   });
 });
