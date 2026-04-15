@@ -42,6 +42,15 @@ let liveServerPort: number | null = null;
 let wss: WebSocketServer | null = null;
 const diagrams = new Map<string, DiagramState>();
 
+// Custom request interceptors (e.g., MCP transport in serve mode).
+// Return true if the request was handled.
+type RequestInterceptor = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
+const requestInterceptors: RequestInterceptor[] = [];
+
+export function addRequestInterceptor(handler: RequestInterceptor): void {
+  requestInterceptors.push(handler);
+}
+
 async function findAvailablePort(
   startPort: number = SERVER_PORT_START,
   maxPort: number = SERVER_PORT_END
@@ -273,6 +282,13 @@ export async function ensureLiveServer(): Promise<number> {
     const url = req.url || "/";
 
     try {
+      // Check custom interceptors first (e.g., MCP StreamableHTTP transport)
+      for (const interceptor of requestInterceptors) {
+        if (await interceptor(req, res)) {
+          return;
+        }
+      }
+
       // Try to match new route system first (gallery, API, new assets)
       const route = matchRoute(url);
       if (route) {

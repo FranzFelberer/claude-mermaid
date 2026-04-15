@@ -2,11 +2,13 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { randomUUID } from "crypto";
 import { readFile } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -222,84 +224,125 @@ const TOOL_DEFINITIONS: Tool[] = [
   },
 ];
 
-const server = new Server(
-  {
-    name: "claude-mermaid",
-    version: VERSION,
-  },
-  {
-    capabilities: {
-      tools: {},
+function createMcpServer(): Server {
+  const server = new Server(
+    {
+      name: "claude-mermaid",
+      version: VERSION,
     },
-  }
-);
-
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  mcpLogger.debug("ListTools request received");
-  return { tools: TOOL_DEFINITIONS };
-});
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const toolName = request.params.name;
-  const args = request.params.arguments;
-
-  mcpLogger.info(`CallTool request: ${toolName}`);
-
-  try {
-    let result;
-    switch (toolName) {
-      case "mermaid_preview":
-        result = await handleMermaidPreview(args);
-        mcpLogger.info(`CallTool completed: ${toolName}`);
-        return result;
-      case "mermaid_save":
-        result = await handleMermaidSave(args);
-        mcpLogger.info(`CallTool completed: ${toolName}`);
-        return result;
-      case "list_mermaid_charts":
-        result = await handleListMermaidCharts();
-        mcpLogger.info(`CallTool completed: ${toolName}`);
-        return result;
-      case "get_mermaid_chart":
-        result = await handleGetMermaidChart(args);
-        mcpLogger.info(`CallTool completed: ${toolName}`);
-        return result;
-      case "update_mermaid_chart":
-        result = await handleUpdateMermaidChart(args);
-        mcpLogger.info(`CallTool completed: ${toolName}`);
-        return result;
-      case "delete_mermaid_chart":
-        result = await handleDeleteMermaidChart(args);
-        mcpLogger.info(`CallTool completed: ${toolName}`);
-        return result;
-      default:
-        mcpLogger.error(`Unknown tool: ${toolName}`);
-        throw new Error(`Unknown tool: ${toolName}`);
+    {
+      capabilities: {
+        tools: {},
+      },
     }
-  } catch (error) {
-    mcpLogger.error(`Tool ${toolName} failed`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
-});
+  );
 
-async function main() {
-  mcpLogger.info("MCP Server starting", { version: VERSION });
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    mcpLogger.debug("ListTools request received");
+    return { tools: TOOL_DEFINITIONS };
+  });
 
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  mcpLogger.info("MCP Server connected via stdio");
-  console.error("Claude Mermaid MCP Server running on stdio");
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const toolName = request.params.name;
+    const args = request.params.arguments;
+
+    mcpLogger.info(`CallTool request: ${toolName}`);
+
+    try {
+      let result;
+      switch (toolName) {
+        case "mermaid_preview":
+          result = await handleMermaidPreview(args);
+          mcpLogger.info(`CallTool completed: ${toolName}`);
+          return result;
+        case "mermaid_save":
+          result = await handleMermaidSave(args);
+          mcpLogger.info(`CallTool completed: ${toolName}`);
+          return result;
+        case "list_mermaid_charts":
+          result = await handleListMermaidCharts();
+          mcpLogger.info(`CallTool completed: ${toolName}`);
+          return result;
+        case "get_mermaid_chart":
+          result = await handleGetMermaidChart(args);
+          mcpLogger.info(`CallTool completed: ${toolName}`);
+          return result;
+        case "update_mermaid_chart":
+          result = await handleUpdateMermaidChart(args);
+          mcpLogger.info(`CallTool completed: ${toolName}`);
+          return result;
+        case "delete_mermaid_chart":
+          result = await handleDeleteMermaidChart(args);
+          mcpLogger.info(`CallTool completed: ${toolName}`);
+          return result;
+        default:
+          mcpLogger.error(`Unknown tool: ${toolName}`);
+          throw new Error(`Unknown tool: ${toolName}`);
+      }
+    } catch (error) {
+      mcpLogger.error(`Tool ${toolName} failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  });
+
+  return server;
 }
 
-if (!isServeMode) {
-  main().catch((error) => {
-    mcpLogger.error("Fatal error during startup", {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    console.error("Fatal error:", error);
-    process.exit(1);
+if (isServeMode) {
+  // Serve mode — mount MCP over StreamableHTTP on the already-running live server.
+  // Each client session gets its own Server+Transport pair (stateful mode).
+  const { addRequestInterceptor } = await import("./live-server.js");
+  const sessions = new Map<string, { server: Server; transport: StreamableHTTPServerTransport }>();
+
+  addRequestInterceptor(async (req, res) => {
+    const url = req.url || "";
+    if (url !== "/mcp" && !url.startsWith("/mcp?")) {
+      return false;
+    }
+
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
+    if (sessionId && sessions.has(sessionId)) {
+      // Existing session — route to its transport
+      const session = sessions.get(sessionId)!;
+      await session.transport.handleRequest(req, res);
+    } else if (req.method === "POST") {
+      // New session — create a fresh Server+Transport pair
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+      });
+      const server = createMcpServer();
+      await server.connect(transport);
+      await transport.handleRequest(req, res);
+
+      // Session ID is set after handleRequest processes the initialize
+      const newSessionId = transport.sessionId;
+      if (newSessionId) {
+        sessions.set(newSessionId, { server, transport });
+        mcpLogger.info(`New MCP session: ${newSessionId}`);
+
+        transport.onclose = () => {
+          sessions.delete(newSessionId);
+          mcpLogger.info(`MCP session closed: ${newSessionId}`);
+        };
+      }
+    } else {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "No valid session. Send an initialize request first." }));
+    }
+
+    return true;
   });
+
+  mcpLogger.info("MCP Server listening via StreamableHTTP at /mcp");
+  console.error("Claude Mermaid MCP Server running via StreamableHTTP at /mcp");
+} else {
+  // stdio mode — Claude Code spawns this as a child process
+  const server = createMcpServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  mcpLogger.info("MCP Server connected via stdio", { version: VERSION });
+  console.error("Claude Mermaid MCP Server running on stdio");
 }
