@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("child_process", () => ({
-  execFile: vi.fn((_cmd: string, _args: string[], cb: Function) => cb(null)),
+  execFile: vi.fn((_cmd: string, _args: string[], cb: Function) =>
+    cb(null, { stdout: "", stderr: "" })
+  ),
 }));
 
 vi.mock("fs/promises", async (importOriginal) => {
@@ -19,11 +21,13 @@ vi.mock("../src/live-server.js", () => ({
 }));
 
 import { readdir, access } from "fs/promises";
+import { execFile } from "child_process";
 import { ensureLiveServer, addLiveDiagram } from "../src/live-server.js";
 import { startServeMode } from "../src/serve.js";
 
 const mockReaddir = vi.mocked(readdir);
 const mockAccess = vi.mocked(access);
+const mockExecFile = vi.mocked(execFile);
 const mockEnsureLiveServer = vi.mocked(ensureLiveServer);
 const mockAddLiveDiagram = vi.mocked(addLiveDiagram);
 
@@ -83,5 +87,40 @@ describe("startServeMode", () => {
 
     expect(mockAddLiveDiagram).not.toHaveBeenCalled();
     expect(mockEnsureLiveServer).toHaveBeenCalled();
+  });
+
+  it("opens browser by default", async () => {
+    mockReaddir.mockResolvedValue([] as any);
+
+    await startServeMode();
+
+    expect(mockExecFile).toHaveBeenCalled();
+  });
+
+  it("opens browser when openBrowser is true", async () => {
+    mockReaddir.mockResolvedValue([] as any);
+
+    await startServeMode({ openBrowser: true });
+
+    expect(mockExecFile).toHaveBeenCalled();
+  });
+
+  it("does not open browser when openBrowser is false", async () => {
+    mockReaddir.mockResolvedValue([] as any);
+
+    await startServeMode({ openBrowser: false });
+
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("still starts server and prints URL when openBrowser is false", async () => {
+    mockReaddir.mockResolvedValue([] as any);
+    const consoleSpy = vi.spyOn(console, "log");
+
+    await startServeMode({ openBrowser: false });
+
+    expect(mockEnsureLiveServer).toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("http://localhost:3737"));
+    consoleSpy.mockRestore();
   });
 });

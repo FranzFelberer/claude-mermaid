@@ -14,6 +14,7 @@ import {
   validateSavePath,
   getOpenCommand,
 } from "./file-utils.js";
+import { listDiagrams, getDiagramInfo, diagramExists } from "./diagram-service.js";
 import { mcpLogger } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -281,6 +282,198 @@ export async function handleMermaidSave(args: any) {
         {
           type: "text",
           text: `Error saving diagram: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export async function handleListMermaidCharts() {
+  try {
+    const diagrams = await listDiagrams();
+
+    if (diagrams.length === 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "No saved diagrams found. Use mermaid_preview to create a diagram first.",
+          },
+        ],
+      };
+    }
+
+    const diagramList = diagrams
+      .map(
+        (d) =>
+          `- ${d.id} (${d.format.toUpperCase()}, ${formatBytes(d.sizeBytes)}, modified ${d.modifiedAt.toISOString()})`
+      )
+      .join("\n");
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Found ${diagrams.length} diagram(s):\n${diagramList}`,
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Error listing diagrams: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+export async function handleGetMermaidChart(args: any) {
+  const previewId = args.preview_id as string;
+
+  if (!previewId) {
+    throw new Error("preview_id parameter is required");
+  }
+
+  try {
+    const info = await getDiagramInfo(previewId);
+    if (!info) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Diagram not found: ${previewId}. Use list_mermaid_charts to see available diagrams.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const source = await loadDiagramSource(previewId);
+    const options = await loadDiagramOptions(previewId);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: [
+            `Diagram: ${info.id}`,
+            `Format: ${info.format.toUpperCase()}`,
+            `Size: ${formatBytes(info.sizeBytes)}`,
+            `Modified: ${info.modifiedAt.toISOString()}`,
+            `Theme: ${options.theme}`,
+            `Background: ${options.background}`,
+            `Dimensions: ${options.width}x${options.height}`,
+            `Scale: ${options.scale}`,
+            ``,
+            `Source:`,
+            "```mermaid",
+            source,
+            "```",
+          ].join("\n"),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Error getting diagram: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+export async function handleUpdateMermaidChart(args: any) {
+  const previewId = args.preview_id as string;
+
+  if (!previewId) {
+    throw new Error("preview_id parameter is required");
+  }
+
+  try {
+    const exists = await diagramExists(previewId);
+    if (!exists) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Diagram not found: ${previewId}. Use mermaid_preview to create a new diagram, or list_mermaid_charts to see existing diagrams.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const existingSource = await loadDiagramSource(previewId);
+    const existingOptions = await loadDiagramOptions(previewId);
+
+    const diagram = args.diagram !== undefined ? (args.diagram as string) : existingSource;
+    const mergedOptions = {
+      theme: args.theme !== undefined ? (args.theme as string) : existingOptions.theme,
+      background:
+        args.background !== undefined ? (args.background as string) : existingOptions.background,
+      width: args.width !== undefined ? (args.width as number) : existingOptions.width,
+      height: args.height !== undefined ? (args.height as number) : existingOptions.height,
+      scale: args.scale !== undefined ? (args.scale as number) : existingOptions.scale,
+    };
+
+    const info = await getDiagramInfo(previewId);
+    const format = info?.format || "svg";
+
+    const previewDir = getPreviewDir(previewId);
+    await mkdir(previewDir, { recursive: true });
+    await saveDiagramSource(previewId, diagram, mergedOptions);
+
+    const liveFilePath = getDiagramFilePath(previewId, format);
+    await renderDiagram({ diagram, previewId, format, ...mergedOptions }, liveFilePath);
+
+    if (format === "svg") {
+      await ensureLiveServer();
+      await addLiveDiagram(previewId, liveFilePath);
+    }
+
+    const changes: string[] = [];
+    if (args.diagram !== undefined) changes.push("source code");
+    if (args.theme !== undefined) changes.push(`theme → ${mergedOptions.theme}`);
+    if (args.background !== undefined) changes.push(`background → ${mergedOptions.background}`);
+    if (args.width !== undefined) changes.push(`width → ${mergedOptions.width}`);
+    if (args.height !== undefined) changes.push(`height → ${mergedOptions.height}`);
+    if (args.scale !== undefined) changes.push(`scale → ${mergedOptions.scale}`);
+
+    const changesText = changes.length > 0 ? changes.join(", ") : "no changes";
+    const reloadNote =
+      format === "svg" && hasActiveConnections(previewId)
+        ? "\nBrowser will refresh automatically."
+        : "";
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Diagram "${previewId}" updated successfully.\nUpdated: ${changesText}${reloadNote}`,
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Error updating diagram: ${error instanceof Error ? error.message : String(error)}`,
         },
       ],
       isError: true,

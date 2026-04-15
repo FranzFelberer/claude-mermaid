@@ -10,7 +10,13 @@ import {
 import { readFile } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { handleMermaidPreview, handleMermaidSave } from "./handlers.js";
+import {
+  handleMermaidPreview,
+  handleMermaidSave,
+  handleListMermaidCharts,
+  handleGetMermaidChart,
+  handleUpdateMermaidChart,
+} from "./handlers.js";
 import { mcpLogger } from "./logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,8 +32,9 @@ if (process.argv.includes("-v") || process.argv.includes("--version")) {
 const isServeMode = process.argv.includes("--serve");
 
 if (isServeMode) {
+  const noBrowser = process.argv.includes("--no-browser");
   const { startServeMode } = await import("./serve.js");
-  await startServeMode();
+  await startServeMode({ openBrowser: !noBrowser });
 }
 
 const TOOL_DEFINITIONS: Tool[] = [
@@ -118,6 +125,80 @@ const TOOL_DEFINITIONS: Tool[] = [
       required: ["save_path", "preview_id"],
     },
   },
+  {
+    name: "list_mermaid_charts",
+    description:
+      "List all saved Mermaid diagrams. " +
+      "Returns diagram IDs, formats, modification times, and file sizes. " +
+      "Use this to see what diagrams are available before using get_mermaid_chart or update_mermaid_chart.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "get_mermaid_chart",
+    description:
+      "Get details of a specific saved Mermaid diagram. " +
+      "Returns the Mermaid source code, rendering options (theme, background, dimensions, scale), " +
+      "format, modification time, and file size.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        preview_id: {
+          type: "string",
+          description:
+            "ID of the diagram to retrieve. Use list_mermaid_charts to find available IDs.",
+        },
+      },
+      required: ["preview_id"],
+    },
+  },
+  {
+    name: "update_mermaid_chart",
+    description:
+      "Update an existing Mermaid diagram's source code and/or rendering options. " +
+      "Only provided parameters are changed; omitted parameters keep their current values. " +
+      "The diagram must already exist (use mermaid_preview to create new diagrams). " +
+      "Re-renders the diagram and triggers live reload if a browser tab is connected. " +
+      "Does NOT open a new browser tab.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        preview_id: {
+          type: "string",
+          description: "ID of the existing diagram to update. Must already exist.",
+        },
+        diagram: {
+          type: "string",
+          description: "New Mermaid diagram source code. If omitted, the existing source is kept.",
+        },
+        theme: {
+          type: "string",
+          enum: ["default", "forest", "dark", "neutral"],
+          description: "Theme of the chart. If omitted, the existing theme is kept.",
+        },
+        background: {
+          type: "string",
+          description: "Background color. If omitted, the existing background is kept.",
+        },
+        width: {
+          type: "number",
+          description: "Diagram width in pixels. If omitted, the existing width is kept.",
+        },
+        height: {
+          type: "number",
+          description: "Diagram height in pixels. If omitted, the existing height is kept.",
+        },
+        scale: {
+          type: "number",
+          description: "Scale factor. If omitted, the existing scale is kept.",
+        },
+      },
+      required: ["preview_id"],
+    },
+  },
 ];
 
 const server = new Server(
@@ -152,6 +233,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return result;
       case "mermaid_save":
         result = await handleMermaidSave(args);
+        mcpLogger.info(`CallTool completed: ${toolName}`);
+        return result;
+      case "list_mermaid_charts":
+        result = await handleListMermaidCharts();
+        mcpLogger.info(`CallTool completed: ${toolName}`);
+        return result;
+      case "get_mermaid_chart":
+        result = await handleGetMermaidChart(args);
+        mcpLogger.info(`CallTool completed: ${toolName}`);
+        return result;
+      case "update_mermaid_chart":
+        result = await handleUpdateMermaidChart(args);
         mcpLogger.info(`CallTool completed: ${toolName}`);
         return result;
       default:

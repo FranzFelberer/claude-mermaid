@@ -1,6 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { handleMermaidPreview, handleMermaidSave } from "../src/handlers.js";
-import { getPreviewDir, getDiagramFilePath } from "../src/file-utils.js";
+import {
+  handleMermaidPreview,
+  handleMermaidSave,
+  handleListMermaidCharts,
+  handleGetMermaidChart,
+  handleUpdateMermaidChart,
+} from "../src/handlers.js";
+import {
+  getPreviewDir,
+  getDiagramFilePath,
+  loadDiagramSource,
+  loadDiagramOptions,
+} from "../src/file-utils.js";
 import { readdir, unlink, access } from "fs/promises";
 import { execFile } from "child_process";
 import { setupTestEnvWithPreview, restoreTestEnv } from "./helpers/env-helpers.js";
@@ -317,5 +328,184 @@ describe("handleMermaidSave", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Error saving diagram");
+  });
+});
+
+describe("handleListMermaidCharts", () => {
+  beforeEach(async () => {
+    await setupTestEnvWithPreview("list-test");
+  });
+
+  afterEach(async () => {
+    await restoreTestEnv();
+  });
+
+  it("should return empty message when no diagrams have been rendered", async () => {
+    // setupTestEnvWithPreview creates the directory but no rendered diagram files
+    const result = await handleListMermaidCharts();
+    expect(result.content[0].text).toContain("No saved diagrams found");
+  });
+
+  it("should list diagrams after creating them", async () => {
+    await handleMermaidPreview({
+      diagram: "graph TD; A-->B",
+      preview_id: "list-test",
+    });
+
+    const result = await handleListMermaidCharts();
+    expect(result.content[0].text).toContain("list-test");
+    expect(result.content[0].text).toContain("1 diagram(s)");
+  });
+
+  it("should list multiple diagrams", async () => {
+    await handleMermaidPreview({
+      diagram: "graph TD; A-->B",
+      preview_id: "list-test",
+    });
+    // Create second diagram in the same test env (don't call setupTestEnvWithPreview again)
+    const { mkdir } = await import("fs/promises");
+    await mkdir(getPreviewDir("list-test-2"), { recursive: true });
+    await handleMermaidPreview({
+      diagram: "graph LR; X-->Y",
+      preview_id: "list-test-2",
+    });
+
+    const result = await handleListMermaidCharts();
+    expect(result.content[0].text).toContain("2 diagram(s)");
+    expect(result.content[0].text).toContain("list-test");
+    expect(result.content[0].text).toContain("list-test-2");
+  });
+});
+
+describe("handleGetMermaidChart", () => {
+  const testPreviewId = "get-test";
+
+  beforeEach(async () => {
+    await setupTestEnvWithPreview(testPreviewId);
+    await handleMermaidPreview({
+      diagram: "graph TD; A-->B",
+      preview_id: testPreviewId,
+      theme: "dark",
+    });
+  });
+
+  afterEach(async () => {
+    await restoreTestEnv();
+  });
+
+  it("should throw error when preview_id is missing", async () => {
+    await expect(handleGetMermaidChart({ preview_id: undefined })).rejects.toThrow(
+      "preview_id parameter is required"
+    );
+  });
+
+  it("should return error for non-existent diagram", async () => {
+    const result = await handleGetMermaidChart({ preview_id: "nonexistent" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Diagram not found");
+  });
+
+  it("should return source code and options for existing diagram", async () => {
+    const result = await handleGetMermaidChart({ preview_id: testPreviewId });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("graph TD; A-->B");
+    expect(result.content[0].text).toContain("dark");
+    expect(result.content[0].text).toContain("SVG");
+  });
+
+  it("should include diagram metadata", async () => {
+    const result = await handleGetMermaidChart({ preview_id: testPreviewId });
+    expect(result.content[0].text).toContain(`Diagram: ${testPreviewId}`);
+    expect(result.content[0].text).toContain("Format:");
+    expect(result.content[0].text).toContain("Size:");
+    expect(result.content[0].text).toContain("Modified:");
+    expect(result.content[0].text).toContain("Dimensions:");
+    expect(result.content[0].text).toContain("Scale:");
+  });
+});
+
+describe("handleUpdateMermaidChart", () => {
+  const testPreviewId = "update-test";
+
+  beforeEach(async () => {
+    await setupTestEnvWithPreview(testPreviewId);
+    await handleMermaidPreview({
+      diagram: "graph TD; A-->B",
+      preview_id: testPreviewId,
+      theme: "default",
+      background: "white",
+    });
+  });
+
+  afterEach(async () => {
+    await restoreTestEnv();
+  });
+
+  it("should throw error when preview_id is missing", async () => {
+    await expect(handleUpdateMermaidChart({ preview_id: undefined })).rejects.toThrow(
+      "preview_id parameter is required"
+    );
+  });
+
+  it("should return error for non-existent diagram", async () => {
+    const result = await handleUpdateMermaidChart({ preview_id: "nonexistent" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Diagram not found");
+  });
+
+  it("should update only the source code when only diagram is provided", async () => {
+    const result = await handleUpdateMermaidChart({
+      preview_id: testPreviewId,
+      diagram: "graph LR; X-->Y",
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("updated successfully");
+    expect(result.content[0].text).toContain("source code");
+
+    const source = await loadDiagramSource(testPreviewId);
+    expect(source).toBe("graph LR; X-->Y");
+  });
+
+  it("should update only options when diagram is not provided", async () => {
+    const result = await handleUpdateMermaidChart({
+      preview_id: testPreviewId,
+      theme: "dark",
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("updated successfully");
+    expect(result.content[0].text).toContain("theme");
+
+    const source = await loadDiagramSource(testPreviewId);
+    expect(source).toBe("graph TD; A-->B");
+
+    const options = await loadDiagramOptions(testPreviewId);
+    expect(options.theme).toBe("dark");
+  });
+
+  it("should update both source and options together", async () => {
+    const result = await handleUpdateMermaidChart({
+      preview_id: testPreviewId,
+      diagram: "graph LR; X-->Y",
+      theme: "forest",
+      width: 1024,
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("source code");
+    expect(result.content[0].text).toContain("theme");
+    expect(result.content[0].text).toContain("width");
+  });
+
+  it("should preserve existing options when not provided", async () => {
+    await handleUpdateMermaidChart({
+      preview_id: testPreviewId,
+      theme: "forest",
+    });
+
+    const options = await loadDiagramOptions(testPreviewId);
+    expect(options.theme).toBe("forest");
+    expect(options.background).toBe("white");
+    expect(options.width).toBe(800);
+    expect(options.height).toBe(600);
+    expect(options.scale).toBe(2);
   });
 });

@@ -41,17 +41,25 @@ async function registerExistingDiagrams(): Promise<number> {
   return registered;
 }
 
-export async function startServeMode(): Promise<void> {
+export interface ServeModeOptions {
+  openBrowser?: boolean;
+}
+
+export async function startServeMode(options: ServeModeOptions = {}): Promise<void> {
+  const { openBrowser = true } = options;
+
   const diagramCount = await registerExistingDiagrams();
   const port = await ensureLiveServer();
   const galleryUrl = `http://localhost:${port}/`;
 
   console.log(`Serving ${diagramCount} diagram(s) at ${galleryUrl}`);
 
-  const { command, args } = getOpenCommand(galleryUrl);
-  try {
-    await execFileAsync(command, args);
-  } catch {
-    console.warn(`Could not open browser automatically. Open ${galleryUrl} manually.`);
+  if (openBrowser) {
+    const { command, args } = getOpenCommand(galleryUrl);
+    try {
+      await execFileAsync(command, args);
+    } catch {
+      console.warn(`Could not open browser automatically. Open ${galleryUrl} manually.`);
+    }
   }
 }

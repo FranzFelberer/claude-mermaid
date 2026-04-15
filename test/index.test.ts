@@ -66,14 +66,45 @@ describe("MCP server tool definitions", () => {
     });
   });
 
+  describe("list_mermaid_charts", () => {
+    it("should be defined with correct name", () => {
+      expect(indexSource).toContain('name: "list_mermaid_charts"');
+    });
+
+    it("should require no parameters", () => {
+      expect(indexSource).toContain('name: "list_mermaid_charts"');
+    });
+  });
+
+  describe("get_mermaid_chart", () => {
+    it("should be defined with correct name", () => {
+      expect(indexSource).toContain('name: "get_mermaid_chart"');
+    });
+  });
+
+  describe("update_mermaid_chart", () => {
+    it("should be defined with correct name", () => {
+      expect(indexSource).toContain('name: "update_mermaid_chart"');
+    });
+
+    it("should support theme options in both preview and update tools", () => {
+      const themeEnums = indexSource.match(/enum: \["default", "forest", "dark", "neutral"\]/g);
+      expect(themeEnums).not.toBeNull();
+      expect(themeEnums!.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
   describe("server configuration", () => {
     it("should use claude-mermaid as server name", () => {
       expect(indexSource).toContain('name: "claude-mermaid"');
     });
 
-    it("should define exactly two tools", () => {
-      const toolNames = indexSource.match(/name: "mermaid_\w+"/g);
-      expect(toolNames).toHaveLength(2);
+    it("should define exactly five tools", () => {
+      expect(indexSource).toContain('name: "mermaid_preview"');
+      expect(indexSource).toContain('name: "mermaid_save"');
+      expect(indexSource).toContain('name: "list_mermaid_charts"');
+      expect(indexSource).toContain('name: "get_mermaid_chart"');
+      expect(indexSource).toContain('name: "update_mermaid_chart"');
     });
   });
 });
