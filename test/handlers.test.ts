@@ -422,6 +422,29 @@ describe("handleGetMermaidChart", () => {
     expect(result.content[0].text).toContain("Dimensions:");
     expect(result.content[0].text).toContain("Scale:");
   });
+
+  it("should normalize backslash-n to br tags in node labels", async () => {
+    await handleMermaidPreview({
+      diagram: 'graph TD; A["Hello\\nWorld"] --> B["Foo\\nBar"]',
+      preview_id: testPreviewId,
+    });
+
+    const result = await handleGetMermaidChart({ preview_id: testPreviewId });
+    expect(result.content[0].text).toContain("Hello<br/>World");
+    expect(result.content[0].text).toContain("Foo<br/>Bar");
+    expect(result.content[0].text).not.toContain("Hello\\nWorld");
+  });
+
+  it("should not normalize outside of quoted labels", async () => {
+    await handleMermaidPreview({
+      diagram: 'graph TD\n    A["Plain"] --> B',
+      preview_id: testPreviewId,
+    });
+
+    const result = await handleGetMermaidChart({ preview_id: testPreviewId });
+    // newlines outside quotes (code-level formatting) should be left alone
+    expect(result.content[0].text).toContain("graph TD\n");
+  });
 });
 
 describe("handleUpdateMermaidChart", () => {

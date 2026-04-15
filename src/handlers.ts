@@ -289,6 +289,20 @@ export async function handleMermaidSave(args: any) {
   }
 }
 
+/**
+ * Normalize Mermaid source for safe round-tripping through get/update tools.
+ * Mermaid-cli treats actual newlines (0x0A) inside quoted labels as line breaks,
+ * but these are ambiguous in plain text (indistinguishable from code-level newlines).
+ * Also, literal two-char \n sequences are NOT interpreted by mermaid-cli.
+ * This replaces both forms with <br/> inside quoted labels, which is unambiguous
+ * and reliably rendered across all mermaid versions.
+ */
+function normalizeMermaidLineBreaks(source: string): string {
+  return source.replace(/"([^"]*?)"/g, (match) =>
+    match.replace(/\\n/g, "<br/>").replace(/\n\s*/g, "<br/>")
+  );
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -359,7 +373,8 @@ export async function handleGetMermaidChart(args: any) {
       };
     }
 
-    const source = await loadDiagramSource(previewId);
+    const rawSource = await loadDiagramSource(previewId);
+    const source = normalizeMermaidLineBreaks(rawSource);
     const options = await loadDiagramOptions(previewId);
 
     return {

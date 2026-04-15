@@ -46,7 +46,8 @@ const TOOL_DEFINITIONS: Tool[] = [
       "Supports themes (default, forest, dark, neutral), custom backgrounds, dimensions, and quality scaling. " +
       "The diagram will auto-refresh when updated. Use mermaid_save to save to disk. " +
       "IMPORTANT: Automatically use this tool whenever you create a Mermaid diagram for the user. " +
-      "NOTE: Sequence diagrams do not support style directives - avoid using 'style' statements in sequenceDiagram.",
+      "NOTE: Sequence diagrams do not support style directives - avoid using 'style' statements in sequenceDiagram. " +
+      "LINE BREAKS: Use <br/> for line breaks in node labels, NOT \\n (mermaid-cli does not interpret literal \\n as line breaks).",
     inputSchema: {
       type: "object",
       properties: {
@@ -142,7 +143,8 @@ const TOOL_DEFINITIONS: Tool[] = [
     description:
       "Get details of a specific saved Mermaid diagram. " +
       "Returns the Mermaid source code, rendering options (theme, background, dimensions, scale), " +
-      "format, modification time, and file size.",
+      "format, modification time, and file size. " +
+      "The returned source normalizes line breaks in node labels to <br/> for unambiguous round-tripping.",
     inputSchema: {
       type: "object",
       properties: {
@@ -162,7 +164,8 @@ const TOOL_DEFINITIONS: Tool[] = [
       "Only provided parameters are changed; omitted parameters keep their current values. " +
       "The diagram must already exist (use mermaid_preview to create new diagrams). " +
       "Re-renders the diagram and triggers live reload if a browser tab is connected. " +
-      "Does NOT open a new browser tab.",
+      "Does NOT open a new browser tab. " +
+      "LINE BREAKS: Use <br/> for line breaks in node labels, NOT \\n (mermaid-cli does not interpret literal \\n as line breaks).",
     inputSchema: {
       type: "object",
       properties: {
