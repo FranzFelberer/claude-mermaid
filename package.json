@@ -12,6 +12,7 @@
     "build/**/*.html",
     "build/**/*.css",
     "build/**/*.svg",
+    "build/**/*.json",
     "CHANGELOG.md"
   ],
   "scripts": {
