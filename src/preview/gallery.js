@@ -77,8 +77,10 @@ function createDiagramCard(diagram) {
   actions.appendChild(deleteBtn);
 
   // Card link wrapper for preview and info
+  // Use the live route (/) instead of the static /view/ route so clicking
+  // a gallery card opens with WebSocket live-reload enabled.
   const cardLink = document.createElement("a");
-  cardLink.href = `/view/${diagram.id}`;
+  cardLink.href = `/${diagram.id}`;
   cardLink.className = "diagram-card-link";
 
   // Preview section
