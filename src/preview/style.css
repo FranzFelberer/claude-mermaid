@@ -145,7 +145,10 @@ svg {
   width: auto !important;
   height: auto !important;
   margin: 0 auto;
-  pointer-events: none;
+  /* `auto` (not `none`) so click directives on Mermaid nodes propagate
+     through to the anchor tags. Pan/zoom still works because the JS
+     pan handlers explicitly skip <a> targets (see script.js). */
+  pointer-events: auto;
 }
 
 /* ===== Mobile layout ===== */
