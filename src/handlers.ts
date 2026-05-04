@@ -105,8 +105,17 @@ async function setupLivePreview(
 
   if (!hasConnections) {
     mcpLogger.info(`Opening browser for new diagram: ${previewId}`, { serverUrl });
-    const { command, args } = getOpenCommand(serverUrl);
-    const child = spawn(command, args, { detached: true, stdio: "ignore" });
+    // If MERMAID_OPEN_APP is set on macOS, route to that app via `open -a`
+    // (typically the installed Chrome PWA "Mermaid Diagram Preview (Live)"),
+    // so new diagrams land as PWA tabs instead of fresh browser tabs.
+    const pwaName = process.env.MERMAID_OPEN_APP;
+    let child;
+    if (pwaName && process.platform === "darwin") {
+      child = spawn("open", ["-a", pwaName, serverUrl], { detached: true, stdio: "ignore" });
+    } else {
+      const { command, args } = getOpenCommand(serverUrl);
+      child = spawn(command, args, { detached: true, stdio: "ignore" });
+    }
     child.on("error", (error) => {
       mcpLogger.warn("Failed to open browser", { error: error.message, serverUrl });
     });
