@@ -1,7 +1,7 @@
 import { createServer, Server as HttpServer, IncomingMessage, ServerResponse } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { watch, FSWatcher } from "fs";
-import { readFile } from "fs/promises";
+import { readFile, readdir, access } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { deflate } from "pako";
@@ -389,7 +389,59 @@ export async function ensureLiveServer(): Promise<number> {
     });
   });
 
+  await restoreDiagramsFromDisk();
   return port;
+}
+
+async function restoreDiagramsFromDisk(): Promise<number> {
+  const liveDir = getLiveDir();
+  let entries;
+  try {
+    entries = await readdir(liveDir, { withFileTypes: true });
+  } catch (error) {
+    webLogger.debug("Skipping diagram restore - live dir not readable", {
+      liveDir,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 0;
+  }
+
+  let restored = 0;
+  let skipped = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const diagramId = entry.name;
+    try {
+      validatePreviewId(diagramId);
+    } catch {
+      skipped++;
+      continue;
+    }
+    if (diagrams.has(diagramId)) continue;
+    const svgPath = join(liveDir, diagramId, "diagram.svg");
+    try {
+      await access(svgPath);
+    } catch {
+      skipped++;
+      continue;
+    }
+    try {
+      await addLiveDiagram(diagramId, svgPath);
+      restored++;
+    } catch (error) {
+      webLogger.warn(`Failed to restore diagram from disk: ${diagramId}`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (restored > 0) {
+    webLogger.info(`Restored ${restored} diagram(s) from disk`, { liveDir, skipped });
+    console.error(`Live reload server: restored ${restored} diagram(s) from disk`);
+  } else {
+    webLogger.debug("No diagrams to restore from disk", { liveDir, skipped });
+  }
+  return restored;
 }
 
 export async function addLiveDiagram(diagramId: string, filePath: string): Promise<void> {
