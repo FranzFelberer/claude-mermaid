@@ -112,7 +112,9 @@
   }
 
   function handleMouseDown(e) {
-    if (!elements.viewport || e.target.closest(".status-bar")) return;
+    // Skip pan handling for status-bar AND anchors (so clicks on Mermaid
+    // click-directive links propagate through instead of being preventDefault'd).
+    if (!elements.viewport || e.target.closest(".status-bar") || e.target.closest("a")) return;
     panState.isDragging = true;
     panState.dragStartX = e.clientX - panState.x;
     panState.dragStartY = e.clientY - panState.y;
@@ -138,7 +140,7 @@
 
   // ===== Touch Event Handlers =====
   function handleTouchStart(e) {
-    if (!elements.viewport || e.target.closest(".status-bar")) return;
+    if (!elements.viewport || e.target.closest(".status-bar") || e.target.closest("a")) return;
     if (e.touches.length !== 1) return;
     panState.isDragging = true;
     panState.dragStartX = e.touches[0].clientX - panState.x;
@@ -418,7 +420,30 @@
     connectWebSocket();
   }
 
+  // ===== Anchor patching =====
+  // Mermaid v10+ emits only xlink:href on <a> tags; modern Chrome wants
+  // a parallel `href`. Also rewrites relative `./foo.svg` URLs to `/foo`
+  // so click directives written for the file:// workflow still work on
+  // the localhost server (which serves diagrams at /<id>, not /<id>.svg).
+  // Finally neutralizes <foreignObject> pointer-events so clicks fall
+  // through to the underlying anchor.
+  function patchAnchors() {
+    const svg = document.querySelector("svg");
+    if (!svg) return;
+    svg.querySelectorAll("a").forEach(function (a) {
+      const xh = a.getAttribute("xlink:href");
+      if (!xh) return;
+      const fixed = xh.replace(/\.\/(.+?)\.svg$/, "/$1");
+      if (fixed !== xh) a.setAttribute("xlink:href", fixed);
+      if (!a.getAttribute("href")) a.setAttribute("href", fixed);
+    });
+    svg.querySelectorAll("foreignObject").forEach(function (fo) {
+      fo.style.pointerEvents = "none";
+    });
+  }
+
   function initialize() {
+    patchAnchors();
     initializePanZoom();
     initializeWebSocket();
   }
