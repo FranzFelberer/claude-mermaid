@@ -37,6 +37,55 @@ const STYLE_PATH = join(PREVIEW_DIR, "style.css");
 const SCRIPT_PATH = join(PREVIEW_DIR, "script.js");
 const FAVICON_PATH = join(PREVIEW_DIR, "favicon.svg");
 
+const NOT_FOUND_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagram not found</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,system-ui,"Segoe UI",sans-serif;max-width:640px;margin:80px auto;padding:24px;color:#1a1a1a;line-height:1.6}
+h1{font-size:24px;margin:0 0 12px}
+.id{background:#fff5f5;padding:2px 8px;border-radius:4px;font-family:ui-monospace,"SF Mono",monospace;color:#c92a2a;word-break:break-all}
+p{color:#4b5563}
+.actions{margin-top:24px;display:flex;gap:12px;flex-wrap:wrap}
+button,a.btn{background:#0366d6;color:#fff;padding:10px 18px;border-radius:6px;border:0;text-decoration:none;font-size:14px;cursor:pointer;font-family:inherit;font-weight:500}
+button:hover,a.btn:hover{background:#0256b9}
+a.btn.secondary{background:#6b7280}
+a.btn.secondary:hover{background:#4b5563}
+.list{margin-top:32px;padding-top:16px;border-top:1px solid #e5e7eb}
+.list h2{font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin:0 0 8px}
+.list ul{padding-left:20px;margin:0}
+.list li{padding:4px 0}
+.list a{color:#0366d6;text-decoration:none}
+.list a:hover{text-decoration:underline}
+code{background:#f3f4f6;padding:1px 6px;border-radius:3px;font-family:ui-monospace,"SF Mono",monospace;font-size:.9em}
+</style>
+</head>
+<body>
+<h1>Diagram not found</h1>
+<p>The diagram <span class="id" id="requestedId"></span> isn't registered on this server.</p>
+<p>This usually means the live server was restarted (e.g. after a macOS logout) and lost its in-memory registry. Re-run <code>mermaid_preview</code> for the missing diagram and the link will work again.</p>
+<div class="actions">
+<button onclick="history.length>1?history.back():location.href='/'">&larr; Back</button>
+<a class="btn secondary" href="/">Open gallery</a>
+</div>
+<div class="list">
+<h2>Currently registered diagrams</h2>
+<ul id="known"><li><em>Loading&hellip;</em></li></ul>
+</div>
+<script>
+document.getElementById('requestedId').textContent=decodeURIComponent(location.pathname.slice(1))||'(empty)';
+fetch('/api/diagrams').then(function(r){return r.json()}).then(function(data){
+var ul=document.getElementById('known');ul.innerHTML='';
+var list=(data&&data.diagrams)||[];
+if(!list.length){ul.innerHTML='<li><em>None &mdash; call mermaid_preview to render one.</em></li>';return}
+list.forEach(function(d){var li=document.createElement('li');var a=document.createElement('a');a.href='/'+d.id;a.textContent=d.id;li.appendChild(a);ul.appendChild(li)})
+}).catch(function(){document.getElementById('known').innerHTML='<li><em>Could not load list</em></li>'});
+</script>
+</body>
+</html>`;
+
 let liveServer: HttpServer | null = null;
 let liveServerPort: number | null = null;
 let wss: WebSocketServer | null = null;
@@ -114,8 +163,8 @@ async function handleViewRequest(url: string, res: ServerResponse, port: number)
     webLogger.warn(`Diagram not found: ${diagramId}`, {
       error: error instanceof Error ? error.message : String(error),
     });
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end(`Diagram not found: ${error instanceof Error ? error.message : String(error)}`);
+    res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(NOT_FOUND_HTML);
   }
 }
 
@@ -130,8 +179,8 @@ async function handleLivePreviewRequest(
 
   if (!diagramId || !diagrams.has(diagramId)) {
     webLogger.warn(`Live preview - diagram not registered: ${diagramId}`);
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("Diagram not found");
+    res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(NOT_FOUND_HTML);
     return;
   }
 
