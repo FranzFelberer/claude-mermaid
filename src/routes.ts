@@ -234,6 +234,27 @@ export async function handleGalleryJs(context: RouteContext): Promise<void> {
   }
 }
 
+export async function handleManifest(context: RouteContext): Promise<void> {
+  const { res } = context;
+  try {
+    const { content, contentType, cacheControl } = await serveStaticFile(
+      join(PREVIEW_DIR, ASSET_FILES.MANIFEST),
+      CONTENT_TYPES.MANIFEST
+    );
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Cache-Control": cacheControl,
+    });
+    res.end(content);
+  } catch (error) {
+    webLogger.error("Failed to serve manifest.json", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    res.writeHead(404, { "Content-Type": CONTENT_TYPES.PLAIN });
+    res.end("Not found");
+  }
+}
+
 /**
  * Route Configuration
  * Maps routes to their handlers
@@ -250,6 +271,7 @@ export const ROUTE_CONFIG: Route[] = [
   { path: ROUTES.SHARED_STYLE, exact: true, handler: handleSharedCss },
   { path: ROUTES.GALLERY_STYLE, exact: true, handler: handleGalleryCss },
   { path: ROUTES.GALLERY_SCRIPT, exact: true, handler: handleGalleryJs },
+  { path: ROUTES.MANIFEST, exact: true, handler: handleManifest },
 ];
 
 /**

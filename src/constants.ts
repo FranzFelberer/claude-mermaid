@@ -45,6 +45,7 @@ export const ASSET_FILES = {
   SCRIPT: "script.js",
   GALLERY_SCRIPT: "gallery.js",
   FAVICON: "favicon.svg",
+  MANIFEST: "manifest.json",
 } as const;
 
 // ===== HTTP Routes =====
@@ -63,6 +64,7 @@ export const ROUTES = {
   GALLERY_STYLE: "/gallery.css",
   SCRIPT: "/script.js",
   GALLERY_SCRIPT: "/gallery.js",
+  MANIFEST: "/manifest.json",
 } as const;
 
 // ===== HTTP Headers =====
@@ -74,6 +76,7 @@ export const CONTENT_TYPES = {
   SVG: "image/svg+xml",
   PNG: "image/png",
   PLAIN: "text/plain",
+  MANIFEST: "application/manifest+json",
 } as const;
 
 export const CACHE_CONTROL = {
@@ -88,7 +91,7 @@ export const CACHE_CONTROL = {
 // - img-src 'self' data: blob:: Allow images from same origin, data URIs, and blob URLs (for PNG export)
 // - connect-src 'self' ws://localhost:*: Allow WebSocket connections
 export const CSP_HEADER =
-  "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:*";
+  "default-src 'none'; manifest-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:*";
 
 // ===== Validation Patterns =====
 export const PREVIEW_ID_REGEX = /^[a-zA-Z0-9_-]+$/;

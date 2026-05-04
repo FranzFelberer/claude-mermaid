@@ -1,0 +1,27 @@
+{
+  "name": "Mermaid Diagram Preview (Live)",
+  "short_name": "Mermaid",
+  "description": "Live Mermaid diagram preview with tabbed navigation",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["tabbed", "standalone"],
+  "tab_strip": {
+    "home_tab": {
+      "scope_patterns": [{ "pathname": "/*" }]
+    },
+    "new_tab_button": {
+      "url": "/"
+    }
+  },
+  "background_color": "#ffffff",
+  "theme_color": "#0366d6",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
