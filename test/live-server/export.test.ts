@@ -30,7 +30,7 @@ async function createDiagramFiles(
   diagramId: string,
   options: { source?: string; options?: object } = {}
 ): Promise<string> {
-  const diagramDir = join(configDir, "claude-mermaid", "live", diagramId);
+  const diagramDir = join(configDir, "claude-mermaid", "live", "default", diagramId);
   await mkdir(diagramDir, { recursive: true });
 
   await writeFile(join(diagramDir, "diagram.mmd"), options.source ?? "graph TD;A-->B;", "utf-8");
@@ -68,7 +68,7 @@ describe("PNG export endpoint", () => {
       await writeFile(outputPath, FAKE_PNG);
     });
 
-    const response = await mockFetch(`http://localhost:${port}/export/${diagramId}`);
+    const response = await mockFetch(`http://localhost:${port}/export/default/${diagramId}`);
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");
@@ -93,7 +93,7 @@ describe("PNG export endpoint", () => {
       await writeFile(outputPath, FAKE_PNG);
     });
 
-    await mockFetch(`http://localhost:${port}/export/${diagramId}`);
+    await mockFetch(`http://localhost:${port}/export/default/${diagramId}`);
 
     expect(mockedRenderDiagram).toHaveBeenCalledOnce();
     const renderOptions = mockedRenderDiagram.mock.calls[0][0];
@@ -101,14 +101,17 @@ describe("PNG export endpoint", () => {
     expect(renderOptions.format).toBe("png");
     expect(renderOptions.theme).toBe("dark");
     expect(renderOptions.previewId).toBe(diagramId);
+    expect(renderOptions.workspace).toBe("default");
   });
 
   it("returns 400 for invalid diagram ID", async () => {
     const port = await ensureLiveServer();
-    const response = await mockFetch(`http://localhost:${port}/export/../etc/passwd`);
+    const response = await mockFetch(
+      `http://localhost:${port}/export/default/..%2Fetc%2Fpasswd`
+    );
 
     expect(response.status).toBe(400);
-    expect(await response.text()).toBe("Invalid diagram ID");
+    expect(await response.text()).toBe("Invalid workspace or diagram ID");
   });
 
   it("returns 400 for empty diagram ID", async () => {
@@ -116,12 +119,12 @@ describe("PNG export endpoint", () => {
     const response = await mockFetch(`http://localhost:${port}/export/`);
 
     expect(response.status).toBe(400);
-    expect(await response.text()).toBe("Diagram ID is required");
+    expect(await response.text()).toBe("Workspace and diagram ID are required");
   });
 
   it("returns 500 when diagram source is missing", async () => {
     const port = await ensureLiveServer();
-    const response = await mockFetch(`http://localhost:${port}/export/nonexistent`);
+    const response = await mockFetch(`http://localhost:${port}/export/default/nonexistent`);
 
     expect(response.status).toBe(500);
     expect(await response.text()).toBe("Failed to export PNG");
@@ -134,7 +137,7 @@ describe("PNG export endpoint", () => {
 
     mockedRenderDiagram.mockRejectedValue(new Error("mermaid-cli crashed"));
 
-    const response = await mockFetch(`http://localhost:${port}/export/${diagramId}`);
+    const response = await mockFetch(`http://localhost:${port}/export/default/${diagramId}`);
 
     expect(response.status).toBe(500);
     expect(await response.text()).toBe("Failed to export PNG");

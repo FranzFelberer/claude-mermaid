@@ -17,7 +17,25 @@
         <h1 class="gallery-title">Diagram Gallery</h1>
         <p class="gallery-subtitle">Browse and open your Mermaid diagrams</p>
 
-        <div class="search-bar mt-lg">
+        <nav class="workspace-tabs mt-md" id="workspaceTabs" role="tablist">
+          <button class="workspace-tab is-active" data-workspace="" role="tab" aria-selected="true">
+            All <span class="workspace-tab-count" data-count="">0</span>
+          </button>
+          <button class="workspace-tab" data-workspace="rocketlink" role="tab" aria-selected="false">
+            Rocketlink <span class="workspace-tab-count" data-count="rocketlink">0</span>
+          </button>
+          <button class="workspace-tab" data-workspace="quartz" role="tab" aria-selected="false">
+            Quartz <span class="workspace-tab-count" data-count="quartz">0</span>
+          </button>
+          <button class="workspace-tab" data-workspace="personal" role="tab" aria-selected="false">
+            Personal <span class="workspace-tab-count" data-count="personal">0</span>
+          </button>
+          <button class="workspace-tab" data-workspace="default" role="tab" aria-selected="false">
+            Default <span class="workspace-tab-count" data-count="default">0</span>
+          </button>
+        </nav>
+
+        <div class="search-bar mt-md">
           <span class="search-icon">🔍</span>
           <input
             type="text"

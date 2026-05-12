@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { getPreviewDir } from "../../src/file-utils.js";
+import type { Workspace } from "../../src/constants.js";
 
 interface EnvSnapshot {
   home: string | undefined;
@@ -39,9 +40,12 @@ export async function setupTestEnv(opts: SetupOptions = {}): Promise<string> {
   return tempHome;
 }
 
-export async function setupTestEnvWithPreview(previewId: string): Promise<string> {
+export async function setupTestEnvWithPreview(
+  previewId: string,
+  workspace: Workspace = "default"
+): Promise<string> {
   await setupTestEnv();
-  const testDir = getPreviewDir(previewId);
+  const testDir = getPreviewDir(workspace, previewId);
   await mkdir(testDir, { recursive: true });
   return testDir;
 }

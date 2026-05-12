@@ -31,7 +31,7 @@ describe("Live server responses", () => {
     const port = await ensureLiveServer();
     const diagramId = "csp-test";
 
-    const diagramDir = join(configDir, "claude-mermaid", "live", diagramId);
+    const diagramDir = join(configDir, "claude-mermaid", "live", "default", diagramId);
     await mkdir(diagramDir, { recursive: true });
     const diagramPath = join(diagramDir, "diagram.svg");
     const optionsPath = join(diagramDir, "options.json");
@@ -39,9 +39,9 @@ describe("Live server responses", () => {
     await writeFile(diagramPath, "<svg>test</svg>", "utf-8");
     await writeFile(optionsPath, JSON.stringify(DEFAULT_DIAGRAM_OPTIONS), "utf-8");
 
-    await addLiveDiagram(diagramId, diagramPath);
+    await addLiveDiagram("default", diagramId, diagramPath);
 
-    const response = await mockFetch(`http://localhost:${port}/${diagramId}`);
+    const response = await mockFetch(`http://localhost:${port}/default/${diagramId}`);
     const cspHeader = response.headers.get("content-security-policy");
 
     expect(cspHeader).toBeTruthy();
@@ -56,7 +56,7 @@ describe("Live server responses", () => {
     const port = await ensureLiveServer();
     const diagramId = "data-test";
 
-    const diagramDir = join(configDir, "claude-mermaid", "live", diagramId);
+    const diagramDir = join(configDir, "claude-mermaid", "live", "default", diagramId);
     await mkdir(diagramDir, { recursive: true });
     const svgPath = join(diagramDir, "diagram.svg");
     const sourcePath = join(diagramDir, "diagram.mmd");
@@ -70,9 +70,11 @@ describe("Live server responses", () => {
       "utf-8"
     );
 
-    await addLiveDiagram(diagramId, svgPath);
+    await addLiveDiagram("default", diagramId, svgPath);
 
-    const response = await mockFetch(`http://localhost:${port}/mermaid-live/${diagramId}`);
+    const response = await mockFetch(
+      `http://localhost:${port}/mermaid-live/default/${diagramId}`
+    );
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.url).toMatch(/^https:\/\/mermaid\.live\/edit#pako:/);
@@ -80,15 +82,17 @@ describe("Live server responses", () => {
 
   it("rejects invalid Mermaid Live IDs", async () => {
     const port = await ensureLiveServer();
-    const response = await mockFetch(`http://localhost:${port}/mermaid-live/../etc/passwd`);
+    const response = await mockFetch(
+      `http://localhost:${port}/mermaid-live/default/..%2Fetc%2Fpasswd`
+    );
     expect(response.status).toBe(400);
     const payload = await response.json();
-    expect(payload.error).toBe("Invalid diagram ID");
+    expect(payload.error).toBe("Invalid workspace or diagram ID");
   });
 
   it("returns 404 for missing Mermaid Live diagram", async () => {
     const port = await ensureLiveServer();
-    const response = await mockFetch(`http://localhost:${port}/mermaid-live/missing`);
+    const response = await mockFetch(`http://localhost:${port}/mermaid-live/default/missing`);
     expect(response.status).toBe(404);
     const payload = await response.json();
     expect(payload.error).toBe("Diagram not found");

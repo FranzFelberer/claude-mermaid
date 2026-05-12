@@ -23,7 +23,8 @@ describe("Diagram Service", () => {
 
   beforeEach(async () => {
     testHomeDir = await setupTestEnv({ setXdgConfig: false });
-    testLiveDir = join(testHomeDir, ".config", "claude-mermaid", "live");
+    // Tests write diagrams into the "default" workspace bucket.
+    testLiveDir = join(testHomeDir, ".config", "claude-mermaid", "live", "default");
     await mkdir(testLiveDir, { recursive: true });
   });
 
@@ -67,6 +68,7 @@ describe("Diagram Service", () => {
 
     it("should skip invalid directory names", async () => {
       await createTestDiagram("valid-diagram", "svg");
+      // Junk dir lives inside the workspace bucket — listDiagrams should ignore it.
       await mkdir(join(testLiveDir, "invalid..diagram"), { recursive: true });
 
       const diagrams = await listDiagrams();
@@ -101,7 +103,7 @@ describe("Diagram Service", () => {
     it("should return diagram info for existing diagram", async () => {
       await createTestDiagram("test-diagram", "svg");
 
-      const info = await getDiagramInfo("test-diagram");
+      const info = await getDiagramInfo("default", "test-diagram");
 
       expect(info).not.toBeNull();
       expect(info!.id).toBe("test-diagram");
@@ -111,13 +113,13 @@ describe("Diagram Service", () => {
     });
 
     it("should return null for non-existent diagram", async () => {
-      const info = await getDiagramInfo("non-existent");
+      const info = await getDiagramInfo("default", "non-existent");
 
       expect(info).toBeNull();
     });
 
     it("should validate preview ID format", async () => {
-      const info = await getDiagramInfo("invalid..id");
+      const info = await getDiagramInfo("default", "invalid..id");
 
       expect(info).toBeNull();
     });
@@ -125,7 +127,7 @@ describe("Diagram Service", () => {
     it("should try all formats and return first found", async () => {
       await createTestDiagram("test-diagram", "png");
 
-      const info = await getDiagramInfo("test-diagram");
+      const info = await getDiagramInfo("default", "test-diagram");
 
       expect(info).not.toBeNull();
       expect(info!.format).toBe("png");
@@ -137,7 +139,7 @@ describe("Diagram Service", () => {
       await writeFile(join(diagramDir, "diagram.svg"), "<svg></svg>");
       await writeFile(join(diagramDir, "diagram.png"), "png-data");
 
-      const info = await getDiagramInfo("test-diagram");
+      const info = await getDiagramInfo("default", "test-diagram");
 
       expect(info).not.toBeNull();
       expect(info!.format).toBe("svg");
@@ -203,19 +205,19 @@ describe("Diagram Service", () => {
     it("should return true for existing diagram", async () => {
       await createTestDiagram("test-diagram", "svg");
 
-      const exists = await diagramExists("test-diagram");
+      const exists = await diagramExists("default", "test-diagram");
 
       expect(exists).toBe(true);
     });
 
     it("should return false for non-existent diagram", async () => {
-      const exists = await diagramExists("non-existent");
+      const exists = await diagramExists("default", "non-existent");
 
       expect(exists).toBe(false);
     });
 
     it("should return false for invalid preview ID", async () => {
-      const exists = await diagramExists("invalid..id");
+      const exists = await diagramExists("default", "invalid..id");
 
       expect(exists).toBe(false);
     });
@@ -244,14 +246,14 @@ describe("Diagram Service", () => {
       await createTestDiagram("test-diagram", "svg");
 
       // Verify diagram exists
-      let exists = await diagramExists("test-diagram");
+      let exists = await diagramExists("default", "test-diagram");
       expect(exists).toBe(true);
 
       // Delete the diagram
-      await deleteDiagram("test-diagram");
+      await deleteDiagram("default", "test-diagram");
 
       // Verify diagram no longer exists
-      exists = await diagramExists("test-diagram");
+      exists = await diagramExists("default", "test-diagram");
       expect(exists).toBe(false);
     });
 
@@ -263,7 +265,7 @@ describe("Diagram Service", () => {
       await writeFile(join(diagramDir, "options.json"), "{}");
 
       // Delete the diagram
-      await deleteDiagram("test-diagram");
+      await deleteDiagram("default", "test-diagram");
 
       // Verify directory no longer exists
       const dirExists = await stat(diagramDir)
@@ -281,7 +283,7 @@ describe("Diagram Service", () => {
       expect(diagrams).toHaveLength(3);
 
       // Delete middle diagram
-      await deleteDiagram("diagram-2");
+      await deleteDiagram("default", "diagram-2");
 
       diagrams = await listDiagrams();
       expect(diagrams).toHaveLength(2);
@@ -289,11 +291,11 @@ describe("Diagram Service", () => {
     });
 
     it("should throw error for non-existent diagram", async () => {
-      await expect(deleteDiagram("non-existent")).rejects.toThrow();
+      await expect(deleteDiagram("default", "non-existent")).rejects.toThrow();
     });
 
     it("should throw error for invalid preview ID", async () => {
-      await expect(deleteDiagram("invalid..id")).rejects.toThrow();
+      await expect(deleteDiagram("default", "invalid..id")).rejects.toThrow();
     });
 
     it("should decrement diagram count after deletion", async () => {
@@ -303,7 +305,7 @@ describe("Diagram Service", () => {
       let count = await getDiagramCount();
       expect(count).toBe(2);
 
-      await deleteDiagram("diagram-1");
+      await deleteDiagram("default", "diagram-1");
 
       count = await getDiagramCount();
       expect(count).toBe(1);

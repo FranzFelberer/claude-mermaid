@@ -96,6 +96,15 @@ export const CSP_HEADER =
 // ===== Validation Patterns =====
 export const PREVIEW_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 
+// ===== Workspaces =====
+// Fixed set of workspaces for organizing diagrams by ownership/context.
+// New workspaces require code change (intentional — keeps the gallery tab
+// layout deterministic and prevents typo-drift like "rocketlink" vs "rocket-link").
+export const WORKSPACES = ["rocketlink", "quartz", "personal", "default"] as const;
+export type Workspace = (typeof WORKSPACES)[number];
+export const DEFAULT_WORKSPACE: Workspace = "default";
+export const WORKSPACE_REGEX = /^(rocketlink|quartz|personal|default)$/;
+
 // CSS-color-safe allowlist. On Windows we invoke npx via `cmd.exe /c`, and
 // cmd.exe re-parses its command line with its own rules (DEP0190/CVE-2024-27980).
 // Allowing only named colors, hex, and rgb/rgba/hsl/hsla keeps shell

@@ -6,40 +6,11 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { readdir, access } from "fs/promises";
-import { join } from "path";
-import { ensureLiveServer, addLiveDiagram } from "./live-server.js";
-import { getLiveDir, getOpenCommand } from "./file-utils.js";
-import { FILE_NAMES } from "./constants.js";
+import { ensureLiveServer } from "./live-server.js";
+import { getOpenCommand } from "./file-utils.js";
+import { getDiagramCount } from "./diagram-service.js";
 
 const execFileAsync = promisify(execFile);
-
-async function registerExistingDiagrams(): Promise<number> {
-  const liveDir = getLiveDir();
-  let registered = 0;
-
-  let entries;
-  try {
-    entries = await readdir(liveDir, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-
-    const svgPath = join(liveDir, entry.name, FILE_NAMES.DIAGRAM_SVG);
-    try {
-      await access(svgPath);
-      await addLiveDiagram(entry.name, svgPath);
-      registered++;
-    } catch {
-      // Skip directories without a rendered SVG
-    }
-  }
-
-  return registered;
-}
 
 export interface ServeModeOptions {
   openBrowser?: boolean;
@@ -48,9 +19,11 @@ export interface ServeModeOptions {
 export async function startServeMode(options: ServeModeOptions = {}): Promise<void> {
   const { openBrowser = true } = options;
 
-  const diagramCount = await registerExistingDiagrams();
+  // ensureLiveServer() restores all on-disk diagrams across workspaces into
+  // the in-memory registry, so we don't need a separate registration step here.
   const port = await ensureLiveServer();
   const galleryUrl = `http://localhost:${port}/`;
+  const diagramCount = await getDiagramCount();
 
   console.log(`Serving ${diagramCount} diagram(s) at ${galleryUrl}`);
 

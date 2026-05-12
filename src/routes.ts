@@ -8,9 +8,11 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
+import { URL } from "url";
 import { RouteContext } from "./types.js";
 import { renderPage } from "./page-renderer.js";
 import { listDiagrams, deleteDiagram } from "./diagram-service.js";
+import { resolveWorkspace } from "./file-utils.js";
 import {
   ROUTES,
   CONTENT_TYPES,
@@ -18,6 +20,9 @@ import {
   CACHE_CONTROL,
   TEMPLATE_FILES,
   ASSET_FILES,
+  WORKSPACE_REGEX,
+  PREVIEW_ID_REGEX,
+  type Workspace,
 } from "./constants.js";
 import { webLogger } from "./logger.js";
 
@@ -77,15 +82,34 @@ export async function handleGallery(context: RouteContext): Promise<void> {
 
 /**
  * API: List Diagrams
- * Returns JSON list of all diagrams
+ * Returns JSON list of all diagrams (optionally filtered by ?workspace=...)
  */
 export async function handleApiDiagrams(context: RouteContext): Promise<void> {
-  const { res } = context;
+  const { res, url } = context;
+
+  let workspaceFilter: Workspace | undefined;
+  try {
+    // url here may be "/api/diagrams?workspace=rocketlink" — parse query.
+    const parsed = new URL(url, "http://localhost");
+    const wsParam = parsed.searchParams.get("workspace");
+    if (wsParam) {
+      workspaceFilter = resolveWorkspace(wsParam);
+    }
+  } catch (error) {
+    res.writeHead(400, { "Content-Type": CONTENT_TYPES.JSON });
+    res.end(
+      JSON.stringify({
+        error: "Invalid workspace parameter",
+        message: error instanceof Error ? error.message : String(error),
+      })
+    );
+    return;
+  }
 
   try {
-    webLogger.debug("API request: list diagrams");
+    webLogger.debug("API request: list diagrams", { workspace: workspaceFilter });
 
-    const diagrams = await listDiagrams();
+    const diagrams = await listDiagrams(workspaceFilter);
 
     const response = {
       diagrams,
@@ -98,7 +122,9 @@ export async function handleApiDiagrams(context: RouteContext): Promise<void> {
     });
     res.end(JSON.stringify(response));
 
-    webLogger.info(`API: Listed ${diagrams.length} diagrams`);
+    webLogger.info(`API: Listed ${diagrams.length} diagrams`, {
+      workspace: workspaceFilter,
+    });
   } catch (error) {
     webLogger.error("API error: list diagrams", {
       error: error instanceof Error ? error.message : String(error),
@@ -115,18 +141,21 @@ export async function handleApiDiagrams(context: RouteContext): Promise<void> {
 
 /**
  * API: Delete Diagram
- * Handles deletion of individual diagrams
+ * Handles deletion of individual diagrams. Path: /api/diagrams/<workspace>/<id>
  */
 export async function handleApiDiagramDelete(context: RouteContext): Promise<void> {
   const { req, res, url } = context;
 
+  // Strip any query string before matching paths.
+  const path = url.split("?")[0];
+
   // If it's exactly /api/diagrams, delegate to the list handler
-  if (url === "/api/diagrams") {
+  if (path === "/api/diagrams") {
     return handleApiDiagrams(context);
   }
 
-  // Check for delete action: DELETE /api/diagrams/:id
-  const deleteMatch = url.match(/^\/api\/diagrams\/([^\/]+)$/);
+  // Check for delete action: DELETE /api/diagrams/<workspace>/<id>
+  const deleteMatch = path.match(/^\/api\/diagrams\/([^\/]+)\/([^\/]+)$/);
   if (deleteMatch) {
     if (req.method !== "DELETE") {
       res.writeHead(405, { "Content-Type": CONTENT_TYPES.JSON });
@@ -134,11 +163,20 @@ export async function handleApiDiagramDelete(context: RouteContext): Promise<voi
       return;
     }
 
-    try {
-      const diagramId = deleteMatch[1];
-      webLogger.debug(`API request: delete diagram ${diagramId}`);
+    const workspaceRaw = deleteMatch[1];
+    const diagramId = deleteMatch[2];
 
-      await deleteDiagram(diagramId);
+    if (!WORKSPACE_REGEX.test(workspaceRaw) || !PREVIEW_ID_REGEX.test(diagramId)) {
+      res.writeHead(400, { "Content-Type": CONTENT_TYPES.JSON });
+      res.end(JSON.stringify({ error: "Invalid workspace or diagram id" }));
+      return;
+    }
+    const workspace = workspaceRaw as Workspace;
+
+    try {
+      webLogger.debug(`API request: delete diagram ${workspace}/${diagramId}`);
+
+      await deleteDiagram(workspace, diagramId);
 
       res.writeHead(200, {
         "Content-Type": CONTENT_TYPES.JSON,
@@ -146,7 +184,7 @@ export async function handleApiDiagramDelete(context: RouteContext): Promise<voi
       });
       res.end(JSON.stringify({ success: true }));
 
-      webLogger.info(`API: Deleted diagram ${diagramId}`);
+      webLogger.info(`API: Deleted diagram ${workspace}/${diagramId}`);
     } catch (error) {
       webLogger.error("API error: delete diagram", {
         error: error instanceof Error ? error.message : String(error),

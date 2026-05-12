@@ -316,7 +316,7 @@ describe("handleMermaidSave", () => {
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toContain("PNG");
 
-    const pngPath = getDiagramFilePath(testPreviewId, "png");
+    const pngPath = getDiagramFilePath("default", testPreviewId, "png");
     await access(pngPath);
     await unlink(pngPath);
   });
@@ -365,7 +365,7 @@ describe("handleListMermaidCharts", () => {
     });
     // Create second diagram in the same test env (don't call setupTestEnvWithPreview again)
     const { mkdir } = await import("fs/promises");
-    await mkdir(getPreviewDir("list-test-2"), { recursive: true });
+    await mkdir(getPreviewDir("default", "list-test-2"), { recursive: true });
     await handleMermaidPreview({
       diagram: "graph LR; X-->Y",
       preview_id: "list-test-2",
@@ -486,7 +486,7 @@ describe("handleUpdateMermaidChart", () => {
     expect(result.content[0].text).toContain("updated successfully");
     expect(result.content[0].text).toContain("source code");
 
-    const source = await loadDiagramSource(testPreviewId);
+    const source = await loadDiagramSource("default", testPreviewId);
     expect(source).toBe("graph LR; X-->Y");
   });
 
@@ -499,10 +499,10 @@ describe("handleUpdateMermaidChart", () => {
     expect(result.content[0].text).toContain("updated successfully");
     expect(result.content[0].text).toContain("theme");
 
-    const source = await loadDiagramSource(testPreviewId);
+    const source = await loadDiagramSource("default", testPreviewId);
     expect(source).toBe("graph TD; A-->B");
 
-    const options = await loadDiagramOptions(testPreviewId);
+    const options = await loadDiagramOptions("default", testPreviewId);
     expect(options.theme).toBe("dark");
   });
 
@@ -525,7 +525,7 @@ describe("handleUpdateMermaidChart", () => {
       theme: "forest",
     });
 
-    const options = await loadDiagramOptions(testPreviewId);
+    const options = await loadDiagramOptions("default", testPreviewId);
     expect(options.theme).toBe("forest");
     expect(options.background).toBe("white");
     expect(options.width).toBe(800);

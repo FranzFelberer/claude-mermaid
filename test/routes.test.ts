@@ -188,12 +188,14 @@ describe("Routes", () => {
         const mockDiagrams = [
           {
             id: "test-1",
+            workspace: "default" as const,
             format: "svg" as const,
             modifiedAt: new Date(),
             sizeBytes: 1024,
           },
           {
             id: "test-2",
+            workspace: "default" as const,
             format: "png" as const,
             modifiedAt: new Date(),
             sizeBytes: 2048,

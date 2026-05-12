@@ -9,7 +9,10 @@ import {
   WINDOWS_SYSTEM_PATHS,
   FILE_NAMES,
   DIR_NAMES,
+  WORKSPACE_REGEX,
+  DEFAULT_WORKSPACE,
 } from "./constants.js";
+import type { Workspace } from "./constants.js";
 import type { DiagramOptions } from "./types.js";
 
 export function getConfigDir(): string {
@@ -25,6 +28,11 @@ export function getAppDir(): string {
 
 export function getLiveDir(): string {
   return join(getAppDir(), DIR_NAMES.LIVE);
+}
+
+export function getWorkspaceDir(workspace: Workspace): string {
+  validateWorkspace(workspace);
+  return join(getLiveDir(), workspace);
 }
 
 export function getLogsDir(): string {
@@ -44,6 +52,29 @@ export function validatePreviewId(previewId: string): void {
 }
 
 /**
+ * Validates a workspace name against the fixed allowlist.
+ * Allowlist is intentionally closed (no free-form workspaces) to keep
+ * gallery tabs deterministic and avoid spelling drift.
+ */
+export function validateWorkspace(workspace: string): void {
+  if (!workspace || !WORKSPACE_REGEX.test(workspace)) {
+    throw new Error(
+      `Invalid workspace "${workspace}". Allowed: rocketlink, quartz, personal, default.`
+    );
+  }
+}
+
+/**
+ * Normalizes a workspace input: falls back to DEFAULT_WORKSPACE when undefined,
+ * otherwise validates and returns the typed value.
+ */
+export function resolveWorkspace(workspace: string | undefined): Workspace {
+  if (workspace === undefined || workspace === "") return DEFAULT_WORKSPACE;
+  validateWorkspace(workspace);
+  return workspace as Workspace;
+}
+
+/**
  * Validates that a background color string is safe to pass as a CLI argument.
  * Accepts CSS named colors, hex, and rgb/rgba/hsl/hsla functions — rejects
  * anything that could be interpreted as a shell metacharacter on Windows,
@@ -57,21 +88,26 @@ export function validateBackground(background: string): void {
   }
 }
 
-export function getPreviewDir(previewId: string): string {
+export function getPreviewDir(workspace: Workspace, previewId: string): string {
+  validateWorkspace(workspace);
   validatePreviewId(previewId);
-  return join(getLiveDir(), previewId);
+  return join(getLiveDir(), workspace, previewId);
 }
 
-export function getDiagramFilePath(previewId: string, format: string): string {
-  return join(getPreviewDir(previewId), `diagram.${format}`);
+export function getDiagramFilePath(
+  workspace: Workspace,
+  previewId: string,
+  format: string
+): string {
+  return join(getPreviewDir(workspace, previewId), `diagram.${format}`);
 }
 
-export function getDiagramSourcePath(previewId: string): string {
-  return join(getPreviewDir(previewId), FILE_NAMES.DIAGRAM_SOURCE);
+export function getDiagramSourcePath(workspace: Workspace, previewId: string): string {
+  return join(getPreviewDir(workspace, previewId), FILE_NAMES.DIAGRAM_SOURCE);
 }
 
-export function getDiagramOptionsPath(previewId: string): string {
-  return join(getPreviewDir(previewId), FILE_NAMES.DIAGRAM_OPTIONS);
+export function getDiagramOptionsPath(workspace: Workspace, previewId: string): string {
+  return join(getPreviewDir(workspace, previewId), FILE_NAMES.DIAGRAM_OPTIONS);
 }
 
 // Re-export DiagramOptions type from types.ts for backward compatibility
@@ -81,23 +117,30 @@ export type { DiagramOptions } from "./types.js";
 export { DEFAULT_DIAGRAM_OPTIONS } from "./constants.js";
 
 export async function saveDiagramSource(
+  workspace: Workspace,
   previewId: string,
   diagram: string,
   options: DiagramOptions
 ): Promise<void> {
-  const sourcePath = getDiagramSourcePath(previewId);
-  const optionsPath = getDiagramOptionsPath(previewId);
+  const sourcePath = getDiagramSourcePath(workspace, previewId);
+  const optionsPath = getDiagramOptionsPath(workspace, previewId);
   await writeFile(sourcePath, diagram, "utf-8");
   await writeFile(optionsPath, JSON.stringify(options, null, 2), "utf-8");
 }
 
-export async function loadDiagramSource(previewId: string): Promise<string> {
-  const sourcePath = getDiagramSourcePath(previewId);
+export async function loadDiagramSource(
+  workspace: Workspace,
+  previewId: string
+): Promise<string> {
+  const sourcePath = getDiagramSourcePath(workspace, previewId);
   return await readFile(sourcePath, "utf-8");
 }
 
-export async function loadDiagramOptions(previewId: string): Promise<DiagramOptions> {
-  const optionsPath = getDiagramOptionsPath(previewId);
+export async function loadDiagramOptions(
+  workspace: Workspace,
+  previewId: string
+): Promise<DiagramOptions> {
+  const optionsPath = getDiagramOptionsPath(workspace, previewId);
   const content = await readFile(optionsPath, "utf-8");
   return JSON.parse(content);
 }
@@ -114,9 +157,10 @@ async function deleteDiagramDirectory(dirPath: string): Promise<void> {
   await rmdir(dirPath);
 }
 
-export async function deleteDiagram(previewId: string): Promise<void> {
+export async function deleteDiagram(workspace: Workspace, previewId: string): Promise<void> {
+  validateWorkspace(workspace);
   validatePreviewId(previewId);
-  const dirPath = getPreviewDir(previewId);
+  const dirPath = getPreviewDir(workspace, previewId);
 
   try {
     await deleteDiagramDirectory(dirPath);

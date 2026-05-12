@@ -1,6 +1,6 @@
 /**
  * Gallery Client-Side Logic
- * Handles diagram loading, search, and interaction
+ * Handles diagram loading, search, workspace tabs, and interaction
  */
 
 // Get port from script tag data attribute
@@ -10,6 +10,8 @@ const SERVER_PORT = currentScript ? currentScript.getAttribute("data-port") : "3
 // State
 let allDiagrams = [];
 let filteredDiagrams = [];
+let activeWorkspace = ""; // "" means All
+let searchQuery = "";
 
 // DOM Elements
 const galleryEl = document.getElementById("gallery");
@@ -17,10 +19,12 @@ const emptyStateEl = document.getElementById("emptyState");
 const noResultsEl = document.getElementById("noResults");
 const searchInput = document.getElementById("searchInput");
 const diagramCountEl = document.getElementById("diagramCount");
+const tabsEl = document.getElementById("workspaceTabs");
 
 // Messages
 const MESSAGES = {
-  DELETE_CONFIRM: (id) => `Are you sure you want to delete diagram "${id}"?`,
+  DELETE_CONFIRM: (workspace, id) =>
+    `Are you sure you want to delete diagram "${workspace}/${id}"?`,
   DELETE_FAILED: (error) => `Failed to delete diagram: ${error}`,
 };
 
@@ -59,6 +63,7 @@ function createDiagramCard(diagram) {
   const card = document.createElement("div");
   card.className = "diagram-card";
   card.dataset.diagramId = diagram.id;
+  card.dataset.workspace = diagram.workspace;
 
   // Action buttons
   const actions = document.createElement("div");
@@ -71,16 +76,15 @@ function createDiagramCard(diagram) {
   deleteBtn.onclick = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    deleteDiagram(diagram.id);
+    deleteDiagram(diagram.workspace, diagram.id);
   };
 
   actions.appendChild(deleteBtn);
 
-  // Card link wrapper for preview and info
-  // Use the live route (/) instead of the static /view/ route so clicking
+  // Card link wrapper — use the live route /<workspace>/<id> so clicking
   // a gallery card opens with WebSocket live-reload enabled.
   const cardLink = document.createElement("a");
-  cardLink.href = `/${diagram.id}`;
+  cardLink.href = `/${diagram.workspace}/${diagram.id}`;
   cardLink.className = "diagram-card-link";
 
   // Preview section
@@ -88,16 +92,14 @@ function createDiagramCard(diagram) {
   preview.className = "diagram-preview";
 
   if (diagram.format === "svg") {
-    // Load SVG preview from the file system via fetch
-    fetch(`/view/${diagram.id}`)
+    // Load SVG preview from the static /view/ route
+    fetch(`/view/${diagram.workspace}/${diagram.id}`)
       .then((response) => response.text())
       .then((html) => {
-        // Extract SVG from the HTML response
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, "text/html");
         const svg = doc.querySelector("svg");
         if (svg) {
-          // Clone and append the SVG
           preview.innerHTML = "";
           preview.appendChild(svg.cloneNode(true));
         } else {
@@ -108,7 +110,6 @@ function createDiagramCard(diagram) {
         preview.innerHTML = '<div class="diagram-preview-placeholder">📊</div>';
       });
   } else {
-    // For PNG/PDF, show placeholder
     preview.innerHTML = '<div class="diagram-preview-placeholder">📊</div>';
   }
 
@@ -118,7 +119,14 @@ function createDiagramCard(diagram) {
 
   const id = document.createElement("h3");
   id.className = "diagram-id";
-  id.textContent = diagram.id;
+
+  const wsTag = document.createElement("span");
+  wsTag.className = "diagram-workspace";
+  wsTag.dataset.workspace = diagram.workspace;
+  wsTag.textContent = diagram.workspace;
+
+  id.appendChild(wsTag);
+  id.appendChild(document.createTextNode(diagram.id));
 
   const meta = document.createElement("div");
   meta.className = "diagram-meta";
@@ -152,28 +160,45 @@ function createDiagramCard(diagram) {
 }
 
 /**
+ * Updates the per-tab badge counts to reflect allDiagrams.
+ */
+function updateTabCounts() {
+  if (!tabsEl) return;
+  const counts = { rocketlink: 0, quartz: 0, personal: 0, default: 0 };
+  allDiagrams.forEach((d) => {
+    if (counts.hasOwnProperty(d.workspace)) counts[d.workspace]++;
+  });
+  tabsEl.querySelectorAll(".workspace-tab-count").forEach((badge) => {
+    const ws = badge.dataset.count;
+    if (ws === "") {
+      badge.textContent = String(allDiagrams.length);
+    } else {
+      badge.textContent = String(counts[ws] || 0);
+    }
+  });
+}
+
+/**
  * Renders the gallery with current filtered diagrams
  */
 function renderGallery() {
-  // Clear gallery
   galleryEl.innerHTML = "";
 
-  // Update count
-  diagramCountEl.textContent = `${filteredDiagrams.length} diagram${filteredDiagrams.length !== 1 ? "s" : ""}`;
+  const countLabel =
+    activeWorkspace === ""
+      ? `${filteredDiagrams.length} diagram${filteredDiagrams.length !== 1 ? "s" : ""}`
+      : `${filteredDiagrams.length} diagram${filteredDiagrams.length !== 1 ? "s" : ""} in ${activeWorkspace}`;
+  diagramCountEl.textContent = countLabel;
 
-  // Show appropriate state
   if (allDiagrams.length === 0) {
-    // No diagrams at all
     galleryEl.style.display = "none";
     emptyStateEl.style.display = "block";
     noResultsEl.style.display = "none";
   } else if (filteredDiagrams.length === 0) {
-    // No results from search
     galleryEl.style.display = "none";
     emptyStateEl.style.display = "none";
     noResultsEl.style.display = "block";
   } else {
-    // Show diagrams
     galleryEl.style.display = "grid";
     emptyStateEl.style.display = "none";
     noResultsEl.style.display = "none";
@@ -186,17 +211,15 @@ function renderGallery() {
 }
 
 /**
- * Filters diagrams based on search query
+ * Recomputes filteredDiagrams from activeWorkspace + searchQuery and re-renders.
  */
-function filterDiagrams(query) {
-  if (!query || !query.trim()) {
-    filteredDiagrams = [...allDiagrams];
-  } else {
-    const normalizedQuery = query.toLowerCase().trim();
-    filteredDiagrams = allDiagrams.filter((diagram) =>
-      diagram.id.toLowerCase().includes(normalizedQuery)
-    );
-  }
+function applyFilters() {
+  const query = (searchQuery || "").toLowerCase().trim();
+  filteredDiagrams = allDiagrams.filter((d) => {
+    if (activeWorkspace !== "" && d.workspace !== activeWorkspace) return false;
+    if (query && !d.id.toLowerCase().includes(query)) return false;
+    return true;
+  });
   renderGallery();
 }
 
@@ -213,9 +236,9 @@ async function loadDiagrams() {
 
     const data = await response.json();
     allDiagrams = data.diagrams || [];
-    filteredDiagrams = [...allDiagrams];
 
-    renderGallery();
+    updateTabCounts();
+    applyFilters();
   } catch (error) {
     console.error("Failed to load diagrams:", error);
     galleryEl.innerHTML = `
@@ -231,28 +254,30 @@ async function loadDiagrams() {
 /**
  * Deletes a diagram
  */
-async function deleteDiagram(diagramId) {
-  if (!confirm(MESSAGES.DELETE_CONFIRM(diagramId))) {
+async function deleteDiagram(workspace, diagramId) {
+  if (!confirm(MESSAGES.DELETE_CONFIRM(workspace, diagramId))) {
     return;
   }
 
   try {
-    const response = await fetch(`http://localhost:${SERVER_PORT}/api/diagrams/${diagramId}`, {
-      method: "DELETE",
-    });
+    const response = await fetch(
+      `http://localhost:${SERVER_PORT}/api/diagrams/${workspace}/${diagramId}`,
+      { method: "DELETE" }
+    );
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    // Remove from the list
-    const index = allDiagrams.findIndex((d) => d.id === diagramId);
+    const index = allDiagrams.findIndex(
+      (d) => d.id === diagramId && d.workspace === workspace
+    );
     if (index !== -1) {
       allDiagrams.splice(index, 1);
     }
 
-    // Re-filter and render
-    filterDiagrams(searchInput.value);
+    updateTabCounts();
+    applyFilters();
   } catch (error) {
     console.error("Failed to delete diagram:", error);
     alert(MESSAGES.DELETE_FAILED(error.message));
@@ -278,9 +303,26 @@ function debounce(func, wait) {
 searchInput.addEventListener(
   "input",
   debounce((e) => {
-    filterDiagrams(e.target.value);
-  }, 300)
+    searchQuery = e.target.value;
+    applyFilters();
+  }, 200)
 );
+
+if (tabsEl) {
+  tabsEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".workspace-tab");
+    if (!btn) return;
+    const ws = btn.dataset.workspace || "";
+    if (ws === activeWorkspace) return;
+    activeWorkspace = ws;
+    tabsEl.querySelectorAll(".workspace-tab").forEach((b) => {
+      const isActive = (b.dataset.workspace || "") === activeWorkspace;
+      b.classList.toggle("is-active", isActive);
+      b.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+    applyFilters();
+  });
+}
 
 // Initialize
 loadDiagrams();

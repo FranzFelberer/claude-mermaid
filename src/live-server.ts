@@ -1,17 +1,18 @@
 import { createServer, Server as HttpServer, IncomingMessage, ServerResponse } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { watch, FSWatcher } from "fs";
-import { readFile, readdir, access } from "fs/promises";
+import { watch } from "fs";
+import { readFile, access } from "fs/promises";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { deflate } from "pako";
 import {
   loadDiagramOptions,
-  getLiveDir,
   getDiagramFilePath,
   loadDiagramSource,
   validatePreviewId,
+  validateWorkspace,
 } from "./file-utils.js";
+import { listDiagrams } from "./diagram-service.js";
 import { renderDiagram } from "./handlers.js";
 import { webLogger } from "./logger.js";
 import { matchRoute } from "./routes.js";
@@ -27,6 +28,9 @@ import {
   WS_MESSAGES,
   DEFAULT_DIAGRAM_OPTIONS,
   TEMPLATE_VARS,
+  WORKSPACE_REGEX,
+  PREVIEW_ID_REGEX,
+  type Workspace,
 } from "./constants.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,6 +63,7 @@ a.btn.secondary:hover{background:#4b5563}
 .list li{padding:4px 0}
 .list a{color:#0366d6;text-decoration:none}
 .list a:hover{text-decoration:underline}
+.tag{display:inline-block;padding:1px 6px;border-radius:3px;background:#eef2ff;color:#4338ca;font-size:.8em;font-weight:600;margin-right:6px;font-family:ui-monospace,"SF Mono",monospace}
 code{background:#f3f4f6;padding:1px 6px;border-radius:3px;font-family:ui-monospace,"SF Mono",monospace;font-size:.9em}
 </style>
 </head>
@@ -80,7 +85,12 @@ fetch('/api/diagrams').then(function(r){return r.json()}).then(function(data){
 var ul=document.getElementById('known');ul.innerHTML='';
 var list=(data&&data.diagrams)||[];
 if(!list.length){ul.innerHTML='<li><em>None &mdash; call mermaid_preview to render one.</em></li>';return}
-list.forEach(function(d){var li=document.createElement('li');var a=document.createElement('a');a.href='/'+d.id;a.textContent=d.id;li.appendChild(a);ul.appendChild(li)})
+list.forEach(function(d){
+  var li=document.createElement('li');
+  var tag=document.createElement('span');tag.className='tag';tag.textContent=d.workspace;
+  var a=document.createElement('a');a.href='/'+d.workspace+'/'+d.id;a.textContent=d.id;
+  li.appendChild(tag);li.appendChild(a);ul.appendChild(li);
+})
 }).catch(function(){document.getElementById('known').innerHTML='<li><em>Could not load list</em></li>'});
 </script>
 </body>
@@ -89,7 +99,33 @@ list.forEach(function(d){var li=document.createElement('li');var a=document.crea
 let liveServer: HttpServer | null = null;
 let liveServerPort: number | null = null;
 let wss: WebSocketServer | null = null;
+// Map key is the composite `${workspace}/${previewId}` so a single map covers all workspaces.
 const diagrams = new Map<string, DiagramState>();
+
+function diagramKey(workspace: Workspace, previewId: string): string {
+  return `${workspace}/${previewId}`;
+}
+
+/**
+ * Parses a URL path segment of the form "<workspace>/<previewId>" with strict
+ * validation against the workspace allowlist and the preview-id regex.
+ * Returns null if the segments don't match — caller should render a 404.
+ */
+function parseWorkspacePath(
+  pathTail: string
+): { workspace: Workspace; previewId: string } | null {
+  const trimmed = pathTail.replace(/^\/+/, "").replace(/\/+$/, "");
+  if (!trimmed) return null;
+  const slashIdx = trimmed.indexOf("/");
+  if (slashIdx === -1) return null;
+  const wsRaw = trimmed.slice(0, slashIdx);
+  const idRaw = trimmed.slice(slashIdx + 1);
+  // Reject any additional path segments — only one slash separator allowed.
+  if (idRaw.includes("/")) return null;
+  if (!WORKSPACE_REGEX.test(wsRaw)) return null;
+  if (!PREVIEW_ID_REGEX.test(idRaw)) return null;
+  return { workspace: wsRaw as Workspace, previewId: idRaw };
+}
 
 // Custom request interceptors (e.g., MCP transport in serve mode).
 // Return true if the request was handled.
@@ -123,44 +159,46 @@ async function findAvailablePort(
 }
 
 async function handleViewRequest(url: string, res: ServerResponse, port: number): Promise<void> {
-  const rawId = url.substring(ROUTES.VIEW.length);
+  const tail = url.substring(ROUTES.VIEW.length);
+  const parsed = parseWorkspacePath(tail);
 
-  let diagramId: string;
-  try {
-    diagramId = decodeURIComponent(rawId);
-    validatePreviewId(diagramId);
-  } catch (error) {
-    webLogger.warn("Invalid view request", {
-      rawId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    res.writeHead(400, { "Content-Type": CONTENT_TYPES.PLAIN });
-    res.end("Invalid diagram ID");
+  if (!parsed) {
+    webLogger.warn(`View request rejected — bad path: ${url}`);
+    res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(NOT_FOUND_HTML);
     return;
   }
 
-  const filePath = join(getLiveDir(), diagramId, "diagram.svg");
+  const { workspace, previewId } = parsed;
+  const filePath = getDiagramFilePath(workspace, previewId, "svg");
 
-  webLogger.debug(`View request for diagram: ${diagramId}`);
+  webLogger.debug(`View request for diagram: ${workspace}/${previewId}`);
 
   try {
     const [content, options] = await Promise.all([
       readFile(filePath, "utf-8"),
-      loadDiagramOptions(diagramId).catch(() => DEFAULT_DIAGRAM_OPTIONS),
+      loadDiagramOptions(workspace, previewId).catch(() => DEFAULT_DIAGRAM_OPTIONS),
     ]);
 
     const background = options.background ?? "white";
 
     // For /view/* pages we explicitly disable live reload/WebSocket
-    const html = await createLiveHtmlWrapper(content, diagramId, port, background, false);
+    const html = await createLiveHtmlWrapper(
+      content,
+      workspace,
+      previewId,
+      port,
+      background,
+      false
+    );
     res.writeHead(200, {
       "Content-Type": "text/html",
       "Content-Security-Policy": CSP_HEADER,
     });
     res.end(html);
-    webLogger.info(`Served view for diagram: ${diagramId}`);
+    webLogger.info(`Served view for diagram: ${workspace}/${previewId}`);
   } catch (error) {
-    webLogger.warn(`Diagram not found: ${diagramId}`, {
+    webLogger.warn(`Diagram not found: ${workspace}/${previewId}`, {
       error: error instanceof Error ? error.message : String(error),
     });
     res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
@@ -173,36 +211,51 @@ async function handleLivePreviewRequest(
   res: ServerResponse,
   port: number
 ): Promise<void> {
-  const diagramId = url.substring(1);
+  const parsed = parseWorkspacePath(url);
 
-  webLogger.debug(`Live preview request for: ${diagramId}`);
-
-  if (!diagramId || !diagrams.has(diagramId)) {
-    webLogger.warn(`Live preview - diagram not registered: ${diagramId}`);
+  if (!parsed) {
+    webLogger.warn(`Live preview request rejected — bad path: ${url}`);
     res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
     res.end(NOT_FOUND_HTML);
     return;
   }
 
-  const state = diagrams.get(diagramId)!;
+  const { workspace, previewId } = parsed;
+  const key = diagramKey(workspace, previewId);
+
+  if (!diagrams.has(key)) {
+    webLogger.warn(`Live preview — diagram not registered: ${key}`);
+    res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(NOT_FOUND_HTML);
+    return;
+  }
+
+  const state = diagrams.get(key)!;
 
   try {
     const [content, options] = await Promise.all([
       readFile(state.filePath, "utf-8"),
-      loadDiagramOptions(diagramId),
+      loadDiagramOptions(workspace, previewId),
     ]);
 
-    const html = await createLiveHtmlWrapper(content, diagramId, port, options.background, true);
+    const html = await createLiveHtmlWrapper(
+      content,
+      workspace,
+      previewId,
+      port,
+      options.background,
+      true
+    );
     res.writeHead(200, {
       "Content-Type": "text/html",
       "Content-Security-Policy": CSP_HEADER,
     });
     res.end(html);
-    webLogger.info(`Served live preview for: ${diagramId}`, {
+    webLogger.info(`Served live preview for: ${key}`, {
       clientCount: state.clients.size,
     });
   } catch (error) {
-    webLogger.error(`Error serving live preview for: ${diagramId}`, {
+    webLogger.error(`Error serving live preview for: ${key}`, {
       error: error instanceof Error ? error.message : String(error),
     });
     res.writeHead(500, { "Content-Type": "text/plain" });
@@ -211,34 +264,30 @@ async function handleLivePreviewRequest(
 }
 
 async function handleMermaidLiveRequest(url: string, res: ServerResponse): Promise<void> {
-  const rawId = url.substring("/mermaid-live/".length);
+  const rawTail = url.substring("/mermaid-live/".length);
 
-  if (!rawId) {
+  if (!rawTail) {
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Diagram ID is required" }));
+    res.end(JSON.stringify({ error: "Workspace and diagram ID are required" }));
     return;
   }
 
-  let diagramId: string;
-  try {
-    diagramId = decodeURIComponent(rawId);
-    validatePreviewId(diagramId);
-  } catch (error) {
-    webLogger.warn("Invalid Mermaid Live request", {
-      rawId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+  const decoded = decodeURIComponent(rawTail);
+  const parsed = parseWorkspacePath(decoded);
+  if (!parsed) {
+    webLogger.warn("Invalid Mermaid Live request", { rawTail });
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Invalid diagram ID" }));
+    res.end(JSON.stringify({ error: "Invalid workspace or diagram ID" }));
     return;
   }
+  const { workspace, previewId } = parsed;
 
-  webLogger.debug(`Mermaid Live export request for: ${diagramId}`);
+  webLogger.debug(`Mermaid Live export request for: ${workspace}/${previewId}`);
 
   try {
     const [code, options] = await Promise.all([
-      loadDiagramSource(diagramId),
-      loadDiagramOptions(diagramId).catch(() => ({ theme: "default" })),
+      loadDiagramSource(workspace, previewId),
+      loadDiagramOptions(workspace, previewId).catch(() => ({ theme: "default" })),
     ]);
 
     const payload = JSON.stringify({
@@ -255,9 +304,9 @@ async function handleMermaidLiveRequest(url: string, res: ServerResponse): Promi
       "Cache-Control": "no-store",
     });
     res.end(JSON.stringify({ url: urlPayload }));
-    webLogger.info(`Served Mermaid Live payload for: ${diagramId}`);
+    webLogger.info(`Served Mermaid Live payload for: ${workspace}/${previewId}`);
   } catch (error) {
-    webLogger.warn(`Mermaid Live export failed for: ${diagramId}`, {
+    webLogger.warn(`Mermaid Live export failed for: ${workspace}/${previewId}`, {
       error: error instanceof Error ? error.message : String(error),
     });
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -266,51 +315,50 @@ async function handleMermaidLiveRequest(url: string, res: ServerResponse): Promi
 }
 
 async function handleExportPngRequest(url: string, res: ServerResponse): Promise<void> {
-  const rawId = url.substring(ROUTES.EXPORT.length);
+  const rawTail = url.substring(ROUTES.EXPORT.length);
 
-  if (!rawId) {
+  if (!rawTail) {
     res.writeHead(400, { "Content-Type": CONTENT_TYPES.PLAIN });
-    res.end("Diagram ID is required");
+    res.end("Workspace and diagram ID are required");
     return;
   }
 
-  let diagramId: string;
-  try {
-    diagramId = decodeURIComponent(rawId);
-    validatePreviewId(diagramId);
-  } catch (error) {
-    webLogger.warn("Invalid export request", {
-      rawId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+  const decoded = decodeURIComponent(rawTail);
+  const parsed = parseWorkspacePath(decoded);
+  if (!parsed) {
+    webLogger.warn("Invalid export request", { rawTail });
     res.writeHead(400, { "Content-Type": CONTENT_TYPES.PLAIN });
-    res.end("Invalid diagram ID");
+    res.end("Invalid workspace or diagram ID");
     return;
   }
+  const { workspace, previewId } = parsed;
 
-  webLogger.debug(`PNG export request for: ${diagramId}`);
+  webLogger.debug(`PNG export request for: ${workspace}/${previewId}`);
 
   try {
     const [diagram, options] = await Promise.all([
-      loadDiagramSource(diagramId),
-      loadDiagramOptions(diagramId).catch(() => DEFAULT_DIAGRAM_OPTIONS),
+      loadDiagramSource(workspace, previewId),
+      loadDiagramOptions(workspace, previewId).catch(() => DEFAULT_DIAGRAM_OPTIONS),
     ]);
 
-    const pngPath = getDiagramFilePath(diagramId, "png");
-    await renderDiagram({ diagram, previewId: diagramId, format: "png", ...options }, pngPath);
+    const pngPath = getDiagramFilePath(workspace, previewId, "png");
+    await renderDiagram(
+      { diagram, workspace, previewId, format: "png", ...options },
+      pngPath
+    );
 
     const pngData = await readFile(pngPath);
     res.writeHead(200, {
       "Content-Type": CONTENT_TYPES.PNG,
-      "Content-Disposition": `attachment; filename="${diagramId}.png"`,
+      "Content-Disposition": `attachment; filename="${previewId}.png"`,
       "Content-Length": pngData.byteLength,
       "Cache-Control": CACHE_CONTROL.NO_STORE,
     });
     res.end(pngData);
 
-    webLogger.info(`Served PNG export for: ${diagramId}`);
+    webLogger.info(`Served PNG export for: ${workspace}/${previewId}`);
   } catch (error) {
-    webLogger.error(`PNG export failed for: ${diagramId}`, {
+    webLogger.error(`PNG export failed for: ${workspace}/${previewId}`, {
       error: error instanceof Error ? error.message : String(error),
     });
     res.writeHead(500, { "Content-Type": CONTENT_TYPES.PLAIN });
@@ -392,7 +440,7 @@ export async function ensureLiveServer(): Promise<number> {
         return;
       }
 
-      // Default: try live preview (diagram ID)
+      // Default: try live preview (workspace/preview id)
       await handleLivePreviewRequest(url, res, port);
     } catch (error) {
       webLogger.error(`HTTP server error for ${url}`, {
@@ -406,27 +454,32 @@ export async function ensureLiveServer(): Promise<number> {
   wss = new WebSocketServer({ server: liveServer });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
-    const diagramId = req.url?.substring(1);
+    const path = req.url || "";
+    const parsed = parseWorkspacePath(path);
 
-    webLogger.info(`WebSocket connection attempt`, { diagramId, url: req.url });
+    webLogger.info(`WebSocket connection attempt`, { path });
 
-    if (diagramId && diagrams.has(diagramId)) {
-      const state = diagrams.get(diagramId)!;
-      state.clients.add(ws);
-      webLogger.info(`WebSocket client connected to diagram: ${diagramId}`, {
-        clientCount: state.clients.size,
-      });
-
-      ws.on("close", () => {
-        state.clients.delete(ws);
-        webLogger.info(`WebSocket client disconnected from diagram: ${diagramId}`, {
+    if (parsed) {
+      const key = diagramKey(parsed.workspace, parsed.previewId);
+      if (diagrams.has(key)) {
+        const state = diagrams.get(key)!;
+        state.clients.add(ws);
+        webLogger.info(`WebSocket client connected to diagram: ${key}`, {
           clientCount: state.clients.size,
         });
-      });
-    } else {
-      webLogger.warn(`WebSocket connection failed - diagram not registered: ${diagramId}`);
-      ws.close();
+
+        ws.on("close", () => {
+          state.clients.delete(ws);
+          webLogger.info(`WebSocket client disconnected from diagram: ${key}`, {
+            clientCount: state.clients.size,
+          });
+        });
+        return;
+      }
     }
+
+    webLogger.warn(`WebSocket connection failed - diagram not registered: ${path}`);
+    ws.close();
   });
 
   await new Promise<void>((resolve) => {
@@ -443,13 +496,13 @@ export async function ensureLiveServer(): Promise<number> {
 }
 
 async function restoreDiagramsFromDisk(): Promise<number> {
-  const liveDir = getLiveDir();
+  // Use the diagram-service to enumerate diagrams across all workspaces — same
+  // recursion the gallery uses, so the registry stays consistent.
   let entries;
   try {
-    entries = await readdir(liveDir, { withFileTypes: true });
+    entries = await listDiagrams();
   } catch (error) {
-    webLogger.debug("Skipping diagram restore - live dir not readable", {
-      liveDir,
+    webLogger.debug("Skipping diagram restore — listDiagrams failed", {
       error: error instanceof Error ? error.message : String(error),
     });
     return 0;
@@ -458,16 +511,17 @@ async function restoreDiagramsFromDisk(): Promise<number> {
   let restored = 0;
   let skipped = 0;
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const diagramId = entry.name;
+    const { workspace, id: previewId } = entry;
     try {
-      validatePreviewId(diagramId);
+      validateWorkspace(workspace);
+      validatePreviewId(previewId);
     } catch {
       skipped++;
       continue;
     }
-    if (diagrams.has(diagramId)) continue;
-    const svgPath = join(liveDir, diagramId, "diagram.svg");
+    const key = diagramKey(workspace, previewId);
+    if (diagrams.has(key)) continue;
+    const svgPath = getDiagramFilePath(workspace, previewId, "svg");
     try {
       await access(svgPath);
     } catch {
@@ -475,65 +529,71 @@ async function restoreDiagramsFromDisk(): Promise<number> {
       continue;
     }
     try {
-      await addLiveDiagram(diagramId, svgPath);
+      await addLiveDiagram(workspace, previewId, svgPath);
       restored++;
     } catch (error) {
-      webLogger.warn(`Failed to restore diagram from disk: ${diagramId}`, {
+      webLogger.warn(`Failed to restore diagram from disk: ${key}`, {
         error: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   if (restored > 0) {
-    webLogger.info(`Restored ${restored} diagram(s) from disk`, { liveDir, skipped });
+    webLogger.info(`Restored ${restored} diagram(s) from disk`, { skipped });
     console.error(`Live reload server: restored ${restored} diagram(s) from disk`);
   } else {
-    webLogger.debug("No diagrams to restore from disk", { liveDir, skipped });
+    webLogger.debug("No diagrams to restore from disk", { skipped });
   }
   return restored;
 }
 
-export async function addLiveDiagram(diagramId: string, filePath: string): Promise<void> {
-  const existingClients = diagrams.has(diagramId)
-    ? diagrams.get(diagramId)!.clients
+export async function addLiveDiagram(
+  workspace: Workspace,
+  previewId: string,
+  filePath: string
+): Promise<void> {
+  const key = diagramKey(workspace, previewId);
+  const existingClients = diagrams.has(key)
+    ? diagrams.get(key)!.clients
     : new Set<WebSocket>();
-  const isUpdate = diagrams.has(diagramId);
+  const isUpdate = diagrams.has(key);
 
   if (isUpdate) {
-    diagrams.get(diagramId)!.watcher.close();
-    webLogger.info(`Updating diagram: ${diagramId}`, {
+    diagrams.get(key)!.watcher.close();
+    webLogger.info(`Updating diagram: ${key}`, {
       existingClientCount: existingClients.size,
     });
   } else {
-    webLogger.info(`Registering new diagram: ${diagramId}`);
+    webLogger.info(`Registering new diagram: ${key}`);
   }
 
   const watcher = watch(filePath, (eventType) => {
     if (eventType === "change") {
-      webLogger.debug(`File change detected for diagram: ${diagramId}`);
-      notifyClients(diagramId);
+      webLogger.debug(`File change detected for diagram: ${key}`);
+      notifyClients(key);
     }
   });
 
-  diagrams.set(diagramId, {
+  diagrams.set(key, {
     filePath,
     watcher,
     clients: existingClients,
   });
 }
 
-export function hasActiveConnections(diagramId: string): boolean {
-  const state = diagrams.get(diagramId);
+export function hasActiveConnections(workspace: Workspace, previewId: string): boolean {
+  const key = diagramKey(workspace, previewId);
+  const state = diagrams.get(key);
   const hasConnections = state ? state.clients.size > 0 : false;
-  webLogger.debug(`Checking active connections for ${diagramId}`, {
+  webLogger.debug(`Checking active connections for ${key}`, {
     hasConnections,
     clientCount: state?.clients.size || 0,
   });
   return hasConnections;
 }
 
-function notifyClients(diagramId: string): void {
-  const state = diagrams.get(diagramId);
+function notifyClients(key: string): void {
+  const state = diagrams.get(key);
   if (!state) return;
 
   let notifiedCount = 0;
@@ -545,7 +605,7 @@ function notifyClients(diagramId: string): void {
   });
 
   if (notifiedCount > 0) {
-    webLogger.info(`Notified clients to reload diagram: ${diagramId}`, {
+    webLogger.info(`Notified clients to reload diagram: ${key}`, {
       notifiedCount,
       totalClients: state.clients.size,
     });
@@ -616,7 +676,8 @@ export async function closeLiveServer(): Promise<void> {
 
 async function createLiveHtmlWrapper(
   content: string,
-  diagramId: string,
+  workspace: Workspace,
+  previewId: string,
   port: number,
   background: string = "white",
   liveEnabled: boolean = true
@@ -628,7 +689,7 @@ async function createLiveHtmlWrapper(
   // DIAGRAM_ID, BACKGROUND, TIMESTAMP need escaping
   return template
     .replaceAll(TEMPLATE_VARS.CONTENT, content)
-    .replaceAll(TEMPLATE_VARS.DIAGRAM_ID, escapeHtml(diagramId))
+    .replaceAll(TEMPLATE_VARS.DIAGRAM_ID, escapeHtml(`${workspace}/${previewId}`))
     .replaceAll(TEMPLATE_VARS.PORT, port.toString())
     .replaceAll(TEMPLATE_VARS.BACKGROUND, escapeHtml(background))
     .replaceAll(TEMPLATE_VARS.TIMESTAMP, escapeHtml(new Date().toLocaleTimeString()))

@@ -12,15 +12,18 @@ import {
   loadDiagramOptions,
   validateBackground,
   validateSavePath,
+  resolveWorkspace,
   getOpenCommand,
 } from "./file-utils.js";
 import { listDiagrams, getDiagramInfo, diagramExists, deleteDiagram } from "./diagram-service.js";
 import { mcpLogger } from "./logger.js";
+import type { Workspace } from "./constants.js";
 
 const execFileAsync = promisify(execFile);
 
 export interface RenderOptions {
   diagram: string;
+  workspace: Workspace;
   previewId: string;
   format: string;
   theme: string;
@@ -31,15 +34,22 @@ export interface RenderOptions {
 }
 
 export async function renderDiagram(options: RenderOptions, liveFilePath: string): Promise<void> {
-  const { diagram, previewId, format, theme, background, width, height, scale } = options;
+  const { diagram, workspace, previewId, format, theme, background, width, height, scale } =
+    options;
 
-  mcpLogger.info(`Rendering diagram: ${previewId}`, { format, theme, width, height });
+  mcpLogger.info(`Rendering diagram: ${workspace}/${previewId}`, {
+    format,
+    theme,
+    width,
+    height,
+  });
 
   const tempDir = join(tmpdir(), "claude-mermaid");
   await mkdir(tempDir, { recursive: true });
 
-  const inputFile = join(tempDir, `diagram-${previewId}.mmd`);
-  const outputFile = join(tempDir, `diagram-${previewId}.${format}`);
+  const tempName = `diagram-${workspace}-${previewId}`;
+  const inputFile = join(tempDir, `${tempName}.mmd`);
+  const outputFile = join(tempDir, `${tempName}.${format}`);
 
   await writeFile(inputFile, diagram, "utf-8");
 
@@ -83,28 +93,29 @@ export async function renderDiagram(options: RenderOptions, liveFilePath: string
       mcpLogger.debug(`mermaid-cli stderr`, { stderr });
     }
     await copyFile(outputFile, liveFilePath);
-    mcpLogger.info(`Diagram rendered successfully: ${previewId}`);
+    mcpLogger.info(`Diagram rendered successfully: ${workspace}/${previewId}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const stderrValue = error instanceof Error && "stderr" in error ? (error as any).stderr : "";
     const stderr = stderrValue ? `\n${stderrValue}` : "";
-    mcpLogger.error(`Diagram rendering failed: ${previewId}`, { error: message });
+    mcpLogger.error(`Diagram rendering failed: ${workspace}/${previewId}`, { error: message });
     throw new Error(`${message}${stderr}`);
   }
 }
 
 async function setupLivePreview(
+  workspace: Workspace,
   previewId: string,
   liveFilePath: string
 ): Promise<{ serverUrl: string; hasConnections: boolean }> {
   const port = await ensureLiveServer();
-  const hasConnections = hasActiveConnections(previewId);
+  const hasConnections = hasActiveConnections(workspace, previewId);
 
-  await addLiveDiagram(previewId, liveFilePath);
-  const serverUrl = `http://localhost:${port}/${previewId}`;
+  await addLiveDiagram(workspace, previewId, liveFilePath);
+  const serverUrl = `http://localhost:${port}/${workspace}/${previewId}`;
 
   if (!hasConnections) {
-    mcpLogger.info(`Opening browser for new diagram: ${previewId}`, { serverUrl });
+    mcpLogger.info(`Opening browser for new diagram: ${workspace}/${previewId}`, { serverUrl });
     // If MERMAID_OPEN_APP is set on macOS, route to that app via `open -a`
     // (typically the installed Chrome PWA "Mermaid Diagram Preview (Live)"),
     // so new diagrams land as PWA tabs instead of fresh browser tabs.
@@ -121,7 +132,7 @@ async function setupLivePreview(
     });
     child.unref();
   } else {
-    mcpLogger.info(`Reusing existing browser tab for diagram: ${previewId}`);
+    mcpLogger.info(`Reusing existing browser tab for diagram: ${workspace}/${previewId}`);
   }
 
   return { serverUrl, hasConnections };
@@ -179,6 +190,21 @@ export async function handleMermaidPreview(args: any) {
     throw new Error("preview_id parameter is required");
   }
 
+  let workspace: Workspace;
+  try {
+    workspace = resolveWorkspace(args.workspace as string | undefined);
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Invalid workspace: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
   try {
     validateBackground(background);
   } catch (error) {
@@ -193,19 +219,29 @@ export async function handleMermaidPreview(args: any) {
     };
   }
 
-  const previewDir = getPreviewDir(previewId);
+  const previewDir = getPreviewDir(workspace, previewId);
   await mkdir(previewDir, { recursive: true });
-  const liveFilePath = getDiagramFilePath(previewId, format);
+  const liveFilePath = getDiagramFilePath(workspace, previewId, format);
 
   try {
-    await saveDiagramSource(previewId, diagram, { theme, background, width, height, scale });
+    await saveDiagramSource(workspace, previewId, diagram, {
+      theme,
+      background,
+      width,
+      height,
+      scale,
+    });
     await renderDiagram(
-      { diagram, previewId, format, theme, background, width, height, scale },
+      { diagram, workspace, previewId, format, theme, background, width, height, scale },
       liveFilePath
     );
 
     if (format === "svg") {
-      const { serverUrl, hasConnections } = await setupLivePreview(previewId, liveFilePath);
+      const { serverUrl, hasConnections } = await setupLivePreview(
+        workspace,
+        previewId,
+        liveFilePath
+      );
       return createLivePreviewResponse(liveFilePath, format, serverUrl, hasConnections);
     } else {
       return createStaticRenderResponse(liveFilePath, format);
@@ -235,6 +271,21 @@ export async function handleMermaidSave(args: any) {
     throw new Error("preview_id parameter is required");
   }
 
+  let workspace: Workspace;
+  try {
+    workspace = resolveWorkspace(args.workspace as string | undefined);
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Invalid workspace: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
   // Validate save path to prevent path traversal attacks
   try {
     validateSavePath(savePath);
@@ -255,16 +306,17 @@ export async function handleMermaidSave(args: any) {
   }
 
   try {
-    const liveFilePath = getDiagramFilePath(previewId, format);
+    const liveFilePath = getDiagramFilePath(workspace, previewId, format);
 
     try {
       await access(liveFilePath);
     } catch {
-      const diagram = await loadDiagramSource(previewId);
-      const options = await loadDiagramOptions(previewId);
+      const diagram = await loadDiagramSource(workspace, previewId);
+      const options = await loadDiagramOptions(workspace, previewId);
       await renderDiagram(
         {
           diagram,
+          workspace,
           previewId,
           format,
           ...options,
@@ -318,16 +370,34 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export async function handleListMermaidCharts() {
-  try {
-    const diagrams = await listDiagrams();
-
-    if (diagrams.length === 0) {
+export async function handleListMermaidCharts(args: any = {}) {
+  let workspaceFilter: Workspace | undefined;
+  if (args.workspace !== undefined && args.workspace !== "") {
+    try {
+      workspaceFilter = resolveWorkspace(args.workspace as string);
+    } catch (error) {
       return {
         content: [
           {
             type: "text",
-            text: "No saved diagrams found. Use mermaid_preview to create a diagram first.",
+            text: `Invalid workspace: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  try {
+    const diagrams = await listDiagrams(workspaceFilter);
+
+    if (diagrams.length === 0) {
+      const where = workspaceFilter ? ` in workspace "${workspaceFilter}"` : "";
+      return {
+        content: [
+          {
+            type: "text",
+            text: `No saved diagrams found${where}. Use mermaid_preview to create a diagram first.`,
           },
         ],
       };
@@ -336,15 +406,19 @@ export async function handleListMermaidCharts() {
     const diagramList = diagrams
       .map(
         (d) =>
-          `- ${d.id} (${d.format.toUpperCase()}, ${formatBytes(d.sizeBytes)}, modified ${d.modifiedAt.toISOString()})`
+          `- [${d.workspace}] ${d.id} (${d.format.toUpperCase()}, ${formatBytes(d.sizeBytes)}, modified ${d.modifiedAt.toISOString()})`
       )
       .join("\n");
+
+    const header = workspaceFilter
+      ? `Found ${diagrams.length} diagram(s) in workspace "${workspaceFilter}":`
+      : `Found ${diagrams.length} diagram(s) across all workspaces:`;
 
     return {
       content: [
         {
           type: "text",
-          text: `Found ${diagrams.length} diagram(s):\n${diagramList}`,
+          text: `${header}\n${diagramList}`,
         },
       ],
     };
@@ -368,23 +442,38 @@ export async function handleGetMermaidChart(args: any) {
     throw new Error("preview_id parameter is required");
   }
 
+  let workspace: Workspace;
   try {
-    const info = await getDiagramInfo(previewId);
+    workspace = resolveWorkspace(args.workspace as string | undefined);
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Invalid workspace: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  try {
+    const info = await getDiagramInfo(workspace, previewId);
     if (!info) {
       return {
         content: [
           {
             type: "text",
-            text: `Diagram not found: ${previewId}. Use list_mermaid_charts to see available diagrams.`,
+            text: `Diagram not found: ${workspace}/${previewId}. Use list_mermaid_charts to see available diagrams.`,
           },
         ],
         isError: true,
       };
     }
 
-    const rawSource = await loadDiagramSource(previewId);
+    const rawSource = await loadDiagramSource(workspace, previewId);
     const source = normalizeMermaidLineBreaks(rawSource);
-    const options = await loadDiagramOptions(previewId);
+    const options = await loadDiagramOptions(workspace, previewId);
 
     return {
       content: [
@@ -392,6 +481,7 @@ export async function handleGetMermaidChart(args: any) {
           type: "text",
           text: [
             `Diagram: ${info.id}`,
+            `Workspace: ${info.workspace}`,
             `Format: ${info.format.toUpperCase()}`,
             `Size: ${formatBytes(info.sizeBytes)}`,
             `Modified: ${info.modifiedAt.toISOString()}`,
@@ -428,22 +518,37 @@ export async function handleUpdateMermaidChart(args: any) {
     throw new Error("preview_id parameter is required");
   }
 
+  let workspace: Workspace;
   try {
-    const exists = await diagramExists(previewId);
+    workspace = resolveWorkspace(args.workspace as string | undefined);
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Invalid workspace: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  try {
+    const exists = await diagramExists(workspace, previewId);
     if (!exists) {
       return {
         content: [
           {
             type: "text",
-            text: `Diagram not found: ${previewId}. Use mermaid_preview to create a new diagram, or list_mermaid_charts to see existing diagrams.`,
+            text: `Diagram not found: ${workspace}/${previewId}. Use mermaid_preview to create a new diagram, or list_mermaid_charts to see existing diagrams.`,
           },
         ],
         isError: true,
       };
     }
 
-    const existingSource = await loadDiagramSource(previewId);
-    const existingOptions = await loadDiagramOptions(previewId);
+    const existingSource = await loadDiagramSource(workspace, previewId);
+    const existingOptions = await loadDiagramOptions(workspace, previewId);
 
     const diagram = args.diagram !== undefined ? (args.diagram as string) : existingSource;
     const mergedOptions = {
@@ -455,19 +560,22 @@ export async function handleUpdateMermaidChart(args: any) {
       scale: args.scale !== undefined ? (args.scale as number) : existingOptions.scale,
     };
 
-    const info = await getDiagramInfo(previewId);
+    const info = await getDiagramInfo(workspace, previewId);
     const format = info?.format || "svg";
 
-    const previewDir = getPreviewDir(previewId);
+    const previewDir = getPreviewDir(workspace, previewId);
     await mkdir(previewDir, { recursive: true });
-    await saveDiagramSource(previewId, diagram, mergedOptions);
+    await saveDiagramSource(workspace, previewId, diagram, mergedOptions);
 
-    const liveFilePath = getDiagramFilePath(previewId, format);
-    await renderDiagram({ diagram, previewId, format, ...mergedOptions }, liveFilePath);
+    const liveFilePath = getDiagramFilePath(workspace, previewId, format);
+    await renderDiagram(
+      { diagram, workspace, previewId, format, ...mergedOptions },
+      liveFilePath
+    );
 
     if (format === "svg") {
       await ensureLiveServer();
-      await addLiveDiagram(previewId, liveFilePath);
+      await addLiveDiagram(workspace, previewId, liveFilePath);
     }
 
     const changes: string[] = [];
@@ -480,7 +588,7 @@ export async function handleUpdateMermaidChart(args: any) {
 
     const changesText = changes.length > 0 ? changes.join(", ") : "no changes";
     const reloadNote =
-      format === "svg" && hasActiveConnections(previewId)
+      format === "svg" && hasActiveConnections(workspace, previewId)
         ? "\nBrowser will refresh automatically."
         : "";
 
@@ -488,7 +596,7 @@ export async function handleUpdateMermaidChart(args: any) {
       content: [
         {
           type: "text",
-          text: `Diagram "${previewId}" updated successfully.\nUpdated: ${changesText}${reloadNote}`,
+          text: `Diagram "${workspace}/${previewId}" updated successfully.\nUpdated: ${changesText}${reloadNote}`,
         },
       ],
     };
@@ -512,14 +620,29 @@ export async function handleDeleteMermaidChart(args: any) {
     throw new Error("preview_id parameter is required");
   }
 
+  let workspace: Workspace;
   try {
-    await deleteDiagram(previewId);
+    workspace = resolveWorkspace(args.workspace as string | undefined);
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Invalid workspace: ${error instanceof Error ? error.message : String(error)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  try {
+    await deleteDiagram(workspace, previewId);
 
     return {
       content: [
         {
           type: "text",
-          text: `Diagram "${previewId}" deleted successfully.`,
+          text: `Diagram "${workspace}/${previewId}" deleted successfully.`,
         },
       ],
     };

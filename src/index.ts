@@ -40,6 +40,19 @@ if (isServeMode) {
   await startServeMode({ openBrowser: !noBrowser });
 }
 
+// Shared workspace parameter spec. Keep description aligned across all tools
+// so the LLM gets a consistent signal about how to pick a value.
+const WORKSPACE_PARAM = {
+  type: "string" as const,
+  enum: ["rocketlink", "quartz", "personal", "default"],
+  description:
+    "Owner of this diagram. Pick 'rocketlink' for Rocketlink/Geminicap work (invoices, " +
+    "pipelines, b2b flows), 'quartz' for Quartz Associates / nGrid work (org design, " +
+    "stakeholder maps, interviews), 'personal' for private work, or 'default' if " +
+    "genuinely ambiguous. Omitting this defaults to 'default' (try to avoid).",
+  default: "default",
+};
+
 const TOOL_DEFINITIONS: Tool[] = [
   {
     name: "mermaid_preview",
@@ -49,6 +62,8 @@ const TOOL_DEFINITIONS: Tool[] = [
       "Supports themes (default, forest, dark, neutral), custom backgrounds, dimensions, and quality scaling. " +
       "The diagram will auto-refresh when updated. Use mermaid_save to save to disk. " +
       "IMPORTANT: Automatically use this tool whenever you create a Mermaid diagram for the user. " +
+      "Diagrams are organized by workspace (rocketlink/quartz/personal/default) — set the workspace " +
+      "param based on the current project context. " +
       "NOTE: Sequence diagrams do not support style directives - avoid using 'style' statements in sequenceDiagram. " +
       "LINE BREAKS: Use <br/> for line breaks in node labels, NOT \\n (mermaid-cli does not interpret literal \\n as line breaks).",
     inputSchema: {
@@ -63,6 +78,7 @@ const TOOL_DEFINITIONS: Tool[] = [
           description:
             "ID for this preview session. Use different IDs for multiple diagrams (e.g., 'architecture', 'flow', 'sequence').",
         },
+        workspace: WORKSPACE_PARAM,
         format: {
           type: "string",
           enum: ["png", "svg", "pdf"],
@@ -118,6 +134,7 @@ const TOOL_DEFINITIONS: Tool[] = [
           description:
             "ID of the preview to save. Must match the preview_id used in mermaid_preview.",
         },
+        workspace: WORKSPACE_PARAM,
         format: {
           type: "string",
           enum: ["png", "svg", "pdf"],
@@ -132,12 +149,19 @@ const TOOL_DEFINITIONS: Tool[] = [
   {
     name: "list_mermaid_charts",
     description:
-      "List all saved Mermaid diagrams. " +
-      "Returns diagram IDs, formats, modification times, and file sizes. " +
+      "List saved Mermaid diagrams. " +
+      "Returns diagram IDs, workspaces, formats, modification times, and file sizes. " +
+      "Without the workspace parameter, lists all diagrams across all workspaces. " +
       "Use this to see what diagrams are available before using get_mermaid_chart or update_mermaid_chart.",
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: {
+        workspace: {
+          ...WORKSPACE_PARAM,
+          description:
+            "Optional workspace filter. Omit to list diagrams across all workspaces.",
+        },
+      },
       required: [],
     },
   },
@@ -156,6 +180,7 @@ const TOOL_DEFINITIONS: Tool[] = [
           description:
             "ID of the diagram to retrieve. Use list_mermaid_charts to find available IDs.",
         },
+        workspace: WORKSPACE_PARAM,
       },
       required: ["preview_id"],
     },
@@ -176,6 +201,7 @@ const TOOL_DEFINITIONS: Tool[] = [
           type: "string",
           description: "ID of the existing diagram to update. Must already exist.",
         },
+        workspace: WORKSPACE_PARAM,
         diagram: {
           type: "string",
           description: "New Mermaid diagram source code. If omitted, the existing source is kept.",
@@ -218,6 +244,7 @@ const TOOL_DEFINITIONS: Tool[] = [
           description:
             "ID of the diagram to delete. Use list_mermaid_charts to find available IDs.",
         },
+        workspace: WORKSPACE_PARAM,
       },
       required: ["preview_id"],
     },
@@ -260,7 +287,7 @@ function createMcpServer(): Server {
           mcpLogger.info(`CallTool completed: ${toolName}`);
           return result;
         case "list_mermaid_charts":
-          result = await handleListMermaidCharts();
+          result = await handleListMermaidCharts(args);
           mcpLogger.info(`CallTool completed: ${toolName}`);
           return result;
         case "get_mermaid_chart":

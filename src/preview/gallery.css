@@ -27,6 +27,97 @@ body {
   color: var(--text-secondary);
 }
 
+/* ===== Workspace Tabs ===== */
+.workspace-tabs {
+  display: flex;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: var(--spacing-sm);
+}
+
+.workspace-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: var(--border-radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workspace-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border-color: var(--border-color);
+}
+
+.workspace-tab.is-active {
+  color: var(--text-primary);
+  background: var(--bg-card);
+  border-color: var(--border-color-hover);
+}
+
+.workspace-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+}
+
+.workspace-tab.is-active .workspace-tab-count {
+  background: var(--accent-color, #0366d6);
+  color: #fff;
+  border-color: transparent;
+}
+
+/* Workspace tag shown on each diagram card */
+.diagram-workspace {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  margin-right: 6px;
+}
+
+.diagram-workspace[data-workspace="rocketlink"] {
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+}
+
+.diagram-workspace[data-workspace="quartz"] {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.diagram-workspace[data-workspace="personal"] {
+  background: rgba(244, 114, 182, 0.15);
+  color: #f472b6;
+}
+
+.diagram-workspace[data-workspace="default"] {
+  background: rgba(156, 163, 175, 0.15);
+  color: #9ca3af;
+}
+
 /* ===== Gallery Stats ===== */
 .gallery-stats {
   display: flex;

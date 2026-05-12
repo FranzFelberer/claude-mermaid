@@ -49,14 +49,14 @@ describe("File Utilities", () => {
 
   describe("getPreviewDir", () => {
     it("should return path with preview_id subdirectory", () => {
-      const previewDir = getPreviewDir("architecture");
+      const previewDir = getPreviewDir("default","architecture");
       expect(previewDir).toContain(".config/claude-mermaid/live");
       expect(previewDir).toContain("architecture");
     });
 
     it("should support different preview_ids", () => {
-      const archDir = getPreviewDir("architecture");
-      const flowDir = getPreviewDir("flow");
+      const archDir = getPreviewDir("default","architecture");
+      const flowDir = getPreviewDir("default","flow");
 
       expect(archDir).toContain("architecture");
       expect(flowDir).toContain("flow");
@@ -65,47 +65,47 @@ describe("File Utilities", () => {
 
     describe("previewId validation", () => {
       it("should accept valid alphanumeric IDs", () => {
-        expect(() => getPreviewDir("diagram123")).not.toThrow();
-        expect(() => getPreviewDir("flow-chart")).not.toThrow();
-        expect(() => getPreviewDir("my_diagram")).not.toThrow();
-        expect(() => getPreviewDir("Diagram-123_test")).not.toThrow();
+        expect(() => getPreviewDir("default","diagram123")).not.toThrow();
+        expect(() => getPreviewDir("default","flow-chart")).not.toThrow();
+        expect(() => getPreviewDir("default","my_diagram")).not.toThrow();
+        expect(() => getPreviewDir("default","Diagram-123_test")).not.toThrow();
       });
 
       it("should reject empty or whitespace-only IDs", () => {
-        expect(() => getPreviewDir("")).toThrow("Invalid preview ID format");
-        expect(() => getPreviewDir("   ")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","   ")).toThrow("Invalid preview ID format");
       });
 
       it("should reject path traversal attempts", () => {
-        expect(() => getPreviewDir("../etc/passwd")).toThrow("Invalid preview ID format");
-        expect(() => getPreviewDir("..")).toThrow("Invalid preview ID format");
-        expect(() => getPreviewDir("foo/../bar")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","../etc/passwd")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","..")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","foo/../bar")).toThrow("Invalid preview ID format");
       });
 
       it("should reject absolute paths", () => {
-        expect(() => getPreviewDir("/etc/passwd")).toThrow("Invalid preview ID format");
-        expect(() => getPreviewDir("/tmp/diagram")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","/etc/passwd")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","/tmp/diagram")).toThrow("Invalid preview ID format");
       });
 
       it("should reject IDs with path separators", () => {
-        expect(() => getPreviewDir("foo/bar")).toThrow("Invalid preview ID format");
-        expect(() => getPreviewDir("foo\\bar")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","foo/bar")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","foo\\bar")).toThrow("Invalid preview ID format");
       });
 
       it("should reject IDs with special characters", () => {
-        expect(() => getPreviewDir("diagram@123")).toThrow("Invalid preview ID format");
-        expect(() => getPreviewDir("test$diagram")).toThrow("Invalid preview ID format");
-        expect(() => getPreviewDir("my diagram")).toThrow("Invalid preview ID format");
-        expect(() => getPreviewDir("test;ls")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","diagram@123")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","test$diagram")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","my diagram")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","test;ls")).toThrow("Invalid preview ID format");
       });
 
       it("should reject IDs with null bytes", () => {
-        expect(() => getPreviewDir("test\0diagram")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","test\0diagram")).toThrow("Invalid preview ID format");
       });
 
       it("should reject IDs starting with dot", () => {
-        expect(() => getPreviewDir(".hidden")).toThrow("Invalid preview ID format");
-        expect(() => getPreviewDir("..secret")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default",".hidden")).toThrow("Invalid preview ID format");
+        expect(() => getPreviewDir("default","..secret")).toThrow("Invalid preview ID format");
       });
     });
   });
@@ -153,16 +153,16 @@ describe("File Utilities", () => {
 
   describe("getDiagramFilePath", () => {
     it("should generate correct file path with preview_id and format", () => {
-      const filePath = getDiagramFilePath("architecture", "svg");
+      const filePath = getDiagramFilePath("default","architecture", "svg");
       expect(filePath).toContain("architecture");
       expect(filePath).toContain("diagram.svg");
       expect(filePath).toContain(".config/claude-mermaid/live");
     });
 
     it("should support different formats", () => {
-      const svgPath = getDiagramFilePath("test", "svg");
-      const pngPath = getDiagramFilePath("test", "png");
-      const pdfPath = getDiagramFilePath("test", "pdf");
+      const svgPath = getDiagramFilePath("default","test", "svg");
+      const pngPath = getDiagramFilePath("default","test", "png");
+      const pdfPath = getDiagramFilePath("default","test", "pdf");
 
       expect(svgPath).toContain("test");
       expect(svgPath).toContain("diagram.svg");
@@ -171,14 +171,14 @@ describe("File Utilities", () => {
     });
 
     it("should place files in preview_id subdirectory", () => {
-      const filePath = getDiagramFilePath("architecture", "svg");
-      expect(filePath).toContain("live/architecture/diagram.svg");
+      const filePath = getDiagramFilePath("default","architecture", "svg");
+      expect(filePath).toContain("live/default/architecture/diagram.svg");
     });
   });
 
   describe("getDiagramSourcePath", () => {
     it("should return .mmd file in preview directory", () => {
-      const sourcePath = getDiagramSourcePath("architecture");
+      const sourcePath = getDiagramSourcePath("default","architecture");
       expect(sourcePath).toContain("architecture");
       expect(sourcePath).toContain("diagram.mmd");
     });
@@ -186,7 +186,7 @@ describe("File Utilities", () => {
 
   describe("getDiagramOptionsPath", () => {
     it("should return options.json file in preview directory", () => {
-      const optionsPath = getDiagramOptionsPath("architecture");
+      const optionsPath = getDiagramOptionsPath("default","architecture");
       expect(optionsPath).toContain("architecture");
       expect(optionsPath).toContain("options.json");
     });
@@ -205,7 +205,7 @@ describe("File Utilities", () => {
     };
 
     beforeEach(async () => {
-      testDir = getPreviewDir(testPreviewId);
+      testDir = getPreviewDir("default",testPreviewId);
       await mkdir(testDir, { recursive: true });
     });
 
@@ -214,27 +214,27 @@ describe("File Utilities", () => {
     });
 
     it("should save and load diagram source", async () => {
-      await saveDiagramSource(testPreviewId, testDiagram, testOptions);
-      const loadedDiagram = await loadDiagramSource(testPreviewId);
+      await saveDiagramSource("default", testPreviewId, testDiagram, testOptions);
+      const loadedDiagram = await loadDiagramSource("default", testPreviewId);
       expect(loadedDiagram).toBe(testDiagram);
     });
 
     it("should save and load diagram options", async () => {
-      await saveDiagramSource(testPreviewId, testDiagram, testOptions);
-      const loadedOptions = await loadDiagramOptions(testPreviewId);
+      await saveDiagramSource("default", testPreviewId, testDiagram, testOptions);
+      const loadedOptions = await loadDiagramOptions("default", testPreviewId);
       expect(loadedOptions).toEqual(testOptions);
     });
 
     it("should create both .mmd and options.json files", async () => {
-      await saveDiagramSource(testPreviewId, testDiagram, testOptions);
+      await saveDiagramSource("default", testPreviewId, testDiagram, testOptions);
       const files = await readdir(testDir);
       expect(files).toContain("diagram.mmd");
       expect(files).toContain("options.json");
     });
 
     it("should preserve all option properties", async () => {
-      await saveDiagramSource(testPreviewId, testDiagram, testOptions);
-      const loadedOptions = await loadDiagramOptions(testPreviewId);
+      await saveDiagramSource("default", testPreviewId, testDiagram, testOptions);
+      const loadedOptions = await loadDiagramOptions("default", testPreviewId);
       expect(loadedOptions.theme).toBe("dark");
       expect(loadedOptions.background).toBe("transparent");
       expect(loadedOptions.width).toBe(1024);

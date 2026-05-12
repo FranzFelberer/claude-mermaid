@@ -55,32 +55,32 @@ describe("Live server basics", () => {
   });
 
   it("adds diagrams without throwing", async () => {
-    await expect(addLiveDiagram("diagram-1", testFilePath)).resolves.not.toThrow();
+    await expect(addLiveDiagram("default", "diagram-1", testFilePath)).resolves.not.toThrow();
   });
 
   it("handles multiple diagrams", async () => {
-    await addLiveDiagram("diagram-1", testFilePath);
-    await addLiveDiagram("diagram-2", testFilePath);
+    await addLiveDiagram("default", "diagram-1", testFilePath);
+    await addLiveDiagram("default", "diagram-2", testFilePath);
 
-    expect(hasActiveConnections("diagram-1")).toBe(false);
-    expect(hasActiveConnections("diagram-2")).toBe(false);
+    expect(hasActiveConnections("default", "diagram-1")).toBe(false);
+    expect(hasActiveConnections("default", "diagram-2")).toBe(false);
   });
 
   it("replaces existing diagram", async () => {
     const id = "replace-test";
-    await addLiveDiagram(id, testFilePath);
-    await addLiveDiagram(id, testFilePath);
-    expect(hasActiveConnections(id)).toBe(false);
+    await addLiveDiagram("default", id, testFilePath);
+    await addLiveDiagram("default", id, testFilePath);
+    expect(hasActiveConnections("default", id)).toBe(false);
   });
 
   it("reports no connections for unknown diagram", () => {
-    expect(hasActiveConnections("non-existent")).toBe(false);
+    expect(hasActiveConnections("default", "non-existent")).toBe(false);
   });
 
   it("reports no connections for newly added diagram", async () => {
     const id = "new-diagram";
-    await addLiveDiagram(id, testFilePath);
-    expect(hasActiveConnections(id)).toBe(false);
+    await addLiveDiagram("default", id, testFilePath);
+    expect(hasActiveConnections("default", id)).toBe(false);
   });
 
   it("escapes HTML entities", () => {

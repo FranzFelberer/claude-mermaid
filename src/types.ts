@@ -3,7 +3,7 @@
  */
 
 import { IncomingMessage, ServerResponse } from "http";
-import { DiagramFormat } from "./constants.js";
+import { DiagramFormat, Workspace } from "./constants.js";
 
 // ===== Diagram Types =====
 
@@ -17,6 +17,7 @@ export interface DiagramOptions {
 
 export interface DiagramInfo {
   id: string;
+  workspace: Workspace;
   format: DiagramFormat;
   modifiedAt: Date;
   sizeBytes: number;
