@@ -102,7 +102,7 @@ describe("Live server responses", () => {
     const port = await ensureLiveServer();
     const diagramId = "view-test";
 
-    const diagramDir = join(configDir, "claude-mermaid", "live", diagramId);
+    const diagramDir = join(configDir, "claude-mermaid", "live", "default", diagramId);
     await mkdir(diagramDir, { recursive: true });
     await writeFile(join(diagramDir, "diagram.svg"), "<svg>view</svg>", "utf-8");
     await writeFile(
@@ -111,7 +111,7 @@ describe("Live server responses", () => {
       "utf-8"
     );
 
-    const response = await mockFetch(`http://localhost:${port}/view/${diagramId}`);
+    const response = await mockFetch(`http://localhost:${port}/view/default/${diagramId}`);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("text/html");
   });
@@ -119,8 +119,9 @@ describe("Live server responses", () => {
   it("rejects /view path traversal attempts", async () => {
     const port = await ensureLiveServer();
     const response = await mockFetch(`http://localhost:${port}/view/../../etc/passwd`);
-    expect(response.status).toBe(400);
-    expect(await response.text()).toBe("Invalid diagram ID");
+    // workspace-scoped /view rejects any non-<workspace>/<id> path with a 404; file never served
+    expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain("root:");
   });
 
   it("rejects /view URL-encoded path traversal", async () => {
@@ -128,7 +129,7 @@ describe("Live server responses", () => {
     const response = await mockFetch(
       `http://localhost:${port}/view/%2e%2e%2f%2e%2e%2fetc%2fpasswd`
     );
-    expect(response.status).toBe(400);
-    expect(await response.text()).toBe("Invalid diagram ID");
+    expect(response.status).toBe(404);
+    expect(await response.text()).not.toContain("root:");
   });
 });
